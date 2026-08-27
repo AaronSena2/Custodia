@@ -1,0 +1,81 @@
+<?php
+require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/helpers.php';
+
+$existingUser = custodia_current_user();
+if ($existingUser) {
+    header('Location: dashboard.php');
+    exit;
+}
+
+$error = null;
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    custodia_require_csrf();
+    $email = trim($_POST['email'] ?? '');
+    $password = (string) ($_POST['password'] ?? '');
+
+    $user = custodia_attempt_login($email, $password);
+    if ($user) {
+        custodia_start_session();
+        $redirect = $_SESSION['redirect_after_login'] ?? 'dashboard.php';
+        unset($_SESSION['redirect_after_login']);
+        header('Location: ' . $redirect);
+        exit;
+    }
+    $error = 'Incorrect email or password.';
+}
+
+custodia_start_session();
+?>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Custodia</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="assets/css/app.css?v=<?= e(custodia_asset_version('assets/css/app.css')) ?>" rel="stylesheet">
+</head>
+<body class="d-flex align-items-center py-5" style="min-height: 100vh; background: #f8fafc;">
+<main class="container" style="max-width: 420px;">
+  <div class="text-center mb-4">
+    <div style="width: 48px; height: 48px; border-radius: 10px; background: linear-gradient(135deg, #14b8a6, #0f766e); display: inline-flex; align-items: center; justify-content: center; margin-bottom: 0.75rem;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="26" height="26"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 4v16"/></svg>
+    </div>
+    <h1 class="h3 fw-bold mb-1">Custodia</h1>
+    <p class="text-muted">Legal File Registry &amp; Movement Tracking</p>
+  </div>
+  <div class="card shadow-sm">
+    <div class="card-body p-4">
+      <?php if ($error): ?>
+        <div class="alert alert-danger py-2"><?= e($error) ?></div>
+      <?php endif; ?>
+      <form method="post" action="login.php">
+        <?= custodia_csrf_field() ?>
+        <div class="mb-3">
+          <label class="form-label" for="email">Email</label>
+          <input class="form-control" type="email" id="email" name="email" required autofocus value="<?= e($_POST['email'] ?? '') ?>">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="password">Password</label>
+          <input class="form-control" type="password" id="password" name="password" required>
+        </div>
+        <button class="btn btn-primary w-100" type="submit">Sign in</button>
+      </form>
+    </div>
+  </div>
+  <div class="card mt-3">
+    <div class="card-body p-3">
+      <p class="small text-muted mb-1 fw-semibold">Demo accounts (password: ChangeMe123!)</p>
+      <ul class="small text-muted mb-0 ps-3">
+        <li>sam.okafor@custodia.demo — System Administrator</li>
+        <li>rita.alvarez@custodia.demo — Records Manager</li>
+        <li>daniel.reyes@custodia.demo — Partner</li>
+        <li>elena.cho@custodia.demo — Associate</li>
+        <li>marcus.webb@custodia.demo — Paralegal</li>
+      </ul>
+    </div>
+  </div>
+</main>
+</body>
+</html>

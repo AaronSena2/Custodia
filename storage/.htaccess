@@ -1,0 +1,20 @@
+# Uploaded document files live under here. They must NEVER be served
+# directly by the web server — every legitimate read goes through
+# actions/download_document.php, which enforces the same matter-access RBAC
+# (ethical walls, confidentiality tiers, assignment) as the rest of the app
+# and writes an audit record. Without this file, once this project is
+# deployed under Apache's document root (see README setup), anyone who
+# guessed or observed a storage path could fetch a confidential document
+# directly, bypassing RBAC entirely — and an uploaded .php file would be
+# *executed* by Apache rather than just served as a static file, since
+# storage/ sits inside the web root.
+#
+# Apache 2.4+ (this project's documented XAMPP target):
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+# Apache 2.2 and earlier fallback:
+<IfModule !mod_authz_core.c>
+    Order deny,allow
+    Deny from all
+</IfModule>

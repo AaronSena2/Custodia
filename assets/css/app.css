@@ -1,0 +1,703 @@
+/* ==========================================================================
+   Custodia design system
+   Applied on top of Bootstrap 5's defaults to match the "Custodia Legal
+   Registry" mockup canvas: dark sidebar shell, teal accent, light content
+   area, pill badges, monospace IDs/timestamps.
+   ========================================================================== */
+
+:root {
+  --cus-ink: #0f172a;
+  --cus-ink-soft: #334155;
+  --cus-muted: #64748b;
+  --cus-border: #e2e8f0;
+  --cus-bg: #f8fafc;
+  --cus-card: #ffffff;
+  --cus-accent: #0d9488;
+  --cus-accent-dark: #0f766e;
+  --cus-accent-light: #14b8a6;
+  --cus-sidebar-bg: #0b1220;
+  --cus-sidebar-active: #1b2740;
+  --cus-sidebar-text: #94a3b8;
+  --cus-sidebar-text-active: #ffffff;
+  --cus-danger: #dc2626;
+  --cus-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background-color: var(--cus-bg);
+  color: var(--cus-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--cus-ink);
+  font-weight: 700;
+}
+
+a { color: var(--cus-accent-dark); }
+a:hover { color: var(--cus-accent); }
+
+/* ---------------------------------------------------------------------- */
+/* App shell: fixed dark sidebar + light content column                   */
+/* ---------------------------------------------------------------------- */
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.app-sidebar {
+  width: 260px;
+  flex: 0 0 260px;
+  background: var(--cus-sidebar-bg);
+  color: var(--cus-sidebar-text);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.app-sidebar .sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 1.5rem 1.25rem 1.25rem;
+}
+
+.app-sidebar .sidebar-brand-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--cus-accent-light), var(--cus-accent-dark));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.app-sidebar .sidebar-brand-icon svg { width: 18px; height: 18px; }
+
+.app-sidebar .sidebar-brand-text { line-height: 1.15; }
+.app-sidebar .sidebar-brand-title {
+  font-weight: 800;
+  font-size: 1.05rem;
+  color: #ffffff;
+  letter-spacing: 0.01em;
+}
+.app-sidebar .sidebar-brand-subtitle {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.app-sidebar .sidebar-nav {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  list-style: none;
+  margin: 0;
+}
+
+.app-sidebar .sidebar-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  color: var(--cus-sidebar-text);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin-bottom: 0.15rem;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.app-sidebar .sidebar-nav-link svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.app-sidebar .sidebar-nav-link:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e2e8f0;
+}
+
+.app-sidebar .sidebar-nav-link.active {
+  background: var(--cus-sidebar-active);
+  color: var(--cus-sidebar-text-active);
+  font-weight: 700;
+}
+
+.app-sidebar .sidebar-nav-badge {
+  margin-left: auto;
+  background: #ef4444;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0.08rem 0.45rem;
+  line-height: 1.4;
+}
+
+.app-sidebar .sidebar-footer {
+  padding: 1rem 1.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.avatar-circle {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--cus-accent-dark);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.app-sidebar .sidebar-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--cus-accent-dark);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.app-sidebar .sidebar-user-name {
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.app-sidebar .sidebar-user-role {
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
+.app-sidebar .sidebar-user-link {
+  margin-left: auto;
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
+.app-content {
+  flex: 1;
+  min-width: 0;
+  padding: 2rem 2.25rem 3rem;
+}
+
+/* Mobile: collapse sidebar to a top bar */
+@media (max-width: 900px) {
+  .app-shell { flex-direction: column; }
+  .app-sidebar {
+    width: 100%;
+    flex: 0 0 auto;
+    height: auto;
+    position: relative;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .app-sidebar .sidebar-nav { display: flex; flex-wrap: wrap; padding: 0.5rem; }
+  .app-sidebar .sidebar-nav-link { padding: 0.4rem 0.6rem; }
+  .app-sidebar .sidebar-footer { margin-left: auto; border-top: none; }
+  .app-content { padding: 1.25rem 1.25rem 2.5rem; }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Page header pattern                                                    */
+/* ---------------------------------------------------------------------- */
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.page-title {
+  font-size: 1.7rem;
+  font-weight: 700;
+  margin-bottom: 0.2rem;
+}
+
+.page-subtitle {
+  color: var(--cus-muted);
+  font-size: 0.9rem;
+  max-width: 46rem;
+}
+
+.page-breadcrumb {
+  font-size: 0.8rem;
+  color: var(--cus-muted);
+  margin-bottom: 0.25rem;
+}
+.page-breadcrumb a { color: var(--cus-muted); text-decoration: none; }
+.page-breadcrumb a:hover { color: var(--cus-accent-dark); }
+
+/* ---------------------------------------------------------------------- */
+/* Cards, tables, stat tiles                                              */
+/* ---------------------------------------------------------------------- */
+
+.card {
+  border: 1px solid var(--cus-border);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  overflow: hidden; /* clips a directly-nested <table>'s square corners to match the card's rounded ones */
+}
+
+.card-header {
+  border-bottom: 1px solid var(--cus-border);
+  font-weight: 700;
+  border-top-left-radius: 12px !important;
+  border-top-right-radius: 12px !important;
+}
+
+.stat-tile {
+  border-radius: 12px;
+  padding: 1.1rem 1.35rem;
+  background: var(--cus-card);
+  border: 1px solid var(--cus-border);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.stat-tile.stat-tile-alert {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.stat-tile .stat-value {
+  font-size: 1.85rem;
+  font-weight: 800;
+  color: var(--cus-ink);
+}
+
+.stat-tile.stat-tile-alert .stat-value { color: var(--cus-danger); }
+
+.stat-tile .stat-label {
+  color: var(--cus-muted);
+  font-size: 0.82rem;
+  margin-bottom: 0.35rem;
+}
+
+.table {
+  color: var(--cus-ink-soft);
+  margin-bottom: 0;
+  --bs-table-hover-bg: rgba(13, 148, 136, 0.06); /* every .table-hover row gets the same teal tint, not just clickable ones */
+}
+
+.table thead th {
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.07em;
+  color: var(--cus-muted);
+  font-weight: 700;
+  padding-top: 0.85rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--cus-border);
+  background: var(--cus-bg) !important;
+}
+
+.table > :not(caption) > * > * {
+  border-bottom-color: var(--cus-border);
+  padding-top: 0.85rem;
+  padding-bottom: 0.85rem;
+}
+
+/* Rows fade/slide in on load — a tasteful once-per-page-load flourish, not a
+   repeating animation, so it never distracts on a table the user is reading. */
+.table > tbody > tr {
+  transition: background-color 0.15s ease;
+  animation: cus-row-in 0.35s ease both;
+}
+.table > tbody > tr:nth-child(1)  { animation-delay: 0.00s; }
+.table > tbody > tr:nth-child(2)  { animation-delay: 0.02s; }
+.table > tbody > tr:nth-child(3)  { animation-delay: 0.04s; }
+.table > tbody > tr:nth-child(4)  { animation-delay: 0.06s; }
+.table > tbody > tr:nth-child(5)  { animation-delay: 0.08s; }
+.table > tbody > tr:nth-child(6)  { animation-delay: 0.10s; }
+.table > tbody > tr:nth-child(7)  { animation-delay: 0.12s; }
+.table > tbody > tr:nth-child(8)  { animation-delay: 0.14s; }
+.table > tbody > tr:nth-child(n+9) { animation-delay: 0.16s; }
+@keyframes cus-row-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .table > tbody > tr { animation: none; }
+}
+
+.table-clickable-row { cursor: pointer; }
+.table-clickable-row:hover { background-color: rgba(13, 148, 136, 0.08); }
+
+.table-responsive {
+  scrollbar-width: thin;
+  scrollbar-color: var(--cus-border) transparent;
+}
+.table-responsive::-webkit-scrollbar { height: 8px; }
+.table-responsive::-webkit-scrollbar-track { background: transparent; }
+.table-responsive::-webkit-scrollbar-thumb { background-color: var(--cus-border); border-radius: 999px; }
+
+.barcode-display, .mono {
+  font-family: var(--cus-mono);
+  letter-spacing: 0.02em;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Badges / pills                                                         */
+/* ---------------------------------------------------------------------- */
+
+.badge {
+  border-radius: 999px;
+  font-weight: 700;
+  padding: 0.32em 0.7em;
+  letter-spacing: 0.01em;
+}
+
+.badge.text-bg-success  { background-color: #dcfce7 !important; color: #166534 !important; }
+.badge.text-bg-warning  { background-color: #fef3c7 !important; color: #92400e !important; }
+.badge.text-bg-info     { background-color: #dbeafe !important; color: #1e40af !important; }
+.badge.text-bg-danger   { background-color: #fee2e2 !important; color: #991b1b !important; }
+.badge.text-bg-secondary{ background-color: #f1f5f9 !important; color: #475569 !important; }
+.badge.text-bg-dark     { background-color: #e2e8f0 !important; color: #334155 !important; }
+.badge.text-bg-primary  { background-color: #ccfbf1 !important; color: #0f766e !important; }
+.badge.text-bg-purple   { background-color: #f3e8ff !important; color: #6b21a8 !important; }
+.badge.text-bg-teal     { background-color: #ccfbf1 !important; color: #0f766e !important; }
+.badge.text-bg-light.border {
+  background-color: #f1f5f9 !important;
+  color: #475569 !important;
+  border-color: #e2e8f0 !important;
+  font-family: var(--cus-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+/* Uppercase, mono action-type badges for the audit log */
+.action-badge {
+  display: inline-block;
+  border-radius: 999px;
+  font-family: var(--cus-mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.3em 0.65em;
+}
+.action-badge-green  { background: #dcfce7; color: #166534; }
+.action-badge-blue   { background: #dbeafe; color: #1e40af; }
+.action-badge-teal   { background: #ccfbf1; color: #0f766e; }
+.action-badge-amber  { background: #fef3c7; color: #92400e; }
+.action-badge-purple { background: #f3e8ff; color: #6b21a8; }
+.action-badge-red    { background: #fee2e2; color: #991b1b; }
+.action-badge-gray   { background: #f1f5f9; color: #475569; }
+
+/* ---------------------------------------------------------------------- */
+/* Buttons                                                                */
+/* ---------------------------------------------------------------------- */
+
+.btn { border-radius: 8px; font-weight: 600; }
+
+.btn-primary {
+  background-color: var(--cus-accent-dark);
+  border-color: var(--cus-accent-dark);
+}
+.btn-primary:hover, .btn-primary:focus {
+  background-color: #0e6b64;
+  border-color: #0e6b64;
+}
+
+.btn-outline-primary {
+  color: var(--cus-accent-dark);
+  border-color: var(--cus-accent-dark);
+}
+.btn-outline-primary:hover {
+  background-color: var(--cus-accent-dark);
+  border-color: var(--cus-accent-dark);
+}
+
+/* Row-action toolbars (Preview/Download/Lock/Compare/… on documents.php,
+   matter.php, admin.php's user table) — a "ghost toolbar" instead of
+   Bootstrap's default merged, bordered .btn-group pill: no border until
+   hover, a tinted color per semantic variant, even spacing regardless of
+   label length. One rule set, so every one of these across the app looks
+   identical rather than each page having its own subtly different take. */
+.btn-group-sm > .btn {
+  border-radius: 6px !important;
+  margin-left: 3px !important;
+  border-color: transparent;
+  background-color: transparent;
+  color: var(--cus-ink-soft);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.3rem 0.6rem;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.btn-group-sm > .btn:first-child { margin-left: 0 !important; }
+.btn-group-sm > .btn:hover {
+  background-color: var(--cus-bg);
+  border-color: transparent;
+  color: var(--cus-ink);
+}
+.btn-group-sm > .btn-outline-primary {
+  background-color: rgba(13, 148, 136, 0.08);
+  color: var(--cus-accent-dark);
+}
+.btn-group-sm > .btn-outline-primary:hover {
+  background-color: rgba(13, 148, 136, 0.18);
+  color: var(--cus-accent-dark);
+}
+.btn-group-sm > .btn-outline-danger {
+  color: var(--cus-danger);
+}
+.btn-group-sm > .btn-outline-danger:hover {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+.btn-group-sm > .btn-outline-success {
+  color: #166534;
+}
+.btn-group-sm > .btn-outline-success:hover {
+  background-color: #dcfce7;
+  color: #166534;
+}
+.btn-group-sm > .btn:disabled {
+  opacity: 0.4;
+  background-color: transparent;
+}
+
+.btn-icon-circle {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  padding: 0;
+}
+.btn-icon-circle.btn-approve { background: #dcfce7; color: #15803d; }
+.btn-icon-circle.btn-approve:hover { background: #bbf7d0; }
+.btn-icon-circle.btn-reject { background: #fee2e2; color: #b91c1c; }
+.btn-icon-circle.btn-reject:hover { background: #fecaca; }
+
+/* ---------------------------------------------------------------------- */
+/* Filter bar (Audit Log, etc.)                                           */
+/* ---------------------------------------------------------------------- */
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 1.1rem;
+}
+
+.filter-bar .form-select,
+.filter-bar .form-control {
+  border-radius: 10px;
+  border-color: var(--cus-border);
+  font-size: 0.85rem;
+}
+
+.filter-bar .filter-col { min-width: 170px; flex: 1 1 170px; }
+.filter-bar .filter-col-search { flex: 1.4 1 220px; }
+
+/* ---------------------------------------------------------------------- */
+/* Tabs (Matter Workspace)                                                */
+/* ---------------------------------------------------------------------- */
+
+.nav-tabs { border-bottom: 1px solid var(--cus-border); }
+.nav-tabs .nav-link {
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--cus-muted);
+  font-weight: 600;
+  padding: 0.6rem 0.9rem;
+  border-radius: 0;
+}
+.nav-tabs .nav-link.active,
+.nav-tabs .nav-link:hover {
+  color: var(--cus-ink);
+  background: transparent;
+  border-color: transparent transparent var(--cus-accent-dark);
+}
+
+/* Filter/segment pill group (Approvals page) */
+.pill-tabs { display: inline-flex; gap: 0.4rem; }
+.pill-tabs .pill-tab {
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: #f1f5f9;
+  color: var(--cus-ink-soft);
+  border: none;
+  text-decoration: none;
+}
+.pill-tabs .pill-tab.active {
+  background: var(--cus-sidebar-bg);
+  color: #fff;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Approval row cards                                                     */
+/* ---------------------------------------------------------------------- */
+
+.approval-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.95rem 0;
+  border-bottom: 1px solid var(--cus-border);
+}
+.approval-row:last-child { border-bottom: none; }
+.approval-row .approval-title { font-weight: 700; font-size: 0.92rem; }
+.approval-row .approval-meta { font-size: 0.8rem; color: var(--cus-muted); margin-top: 0.1rem; }
+.approval-row .approval-quote { font-size: 0.82rem; color: var(--cus-ink-soft); font-style: italic; margin-top: 0.35rem; }
+.approval-row .approval-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+
+/* ---------------------------------------------------------------------- */
+/* Registry Scan Station CTA card                                         */
+/* ---------------------------------------------------------------------- */
+
+.scan-cta-card {
+  display: block;
+  background: var(--cus-sidebar-bg);
+  color: #fff;
+  border-radius: 12px;
+  border: none;
+}
+.scan-cta-card .card-body { padding: 1.35rem; }
+
+/* ---------------------------------------------------------------------- */
+/* Progress bars (Active Matters by Practice Area)                        */
+/* ---------------------------------------------------------------------- */
+
+.progress { background-color: #e2e8f0; border-radius: 999px; }
+.progress-bar { background-color: var(--cus-accent-dark); border-radius: 999px; }
+
+/* ---------------------------------------------------------------------- */
+/* Modals                                                                 */
+/* ---------------------------------------------------------------------- */
+
+.modal-content { border-radius: 14px; border: none; }
+.modal-header { border-bottom: 1px solid var(--cus-border); }
+.modal-footer { border-top: none; padding-top: 0; }
+
+.form-control, .form-select {
+  border-radius: 8px;
+  border-color: var(--cus-border);
+}
+.form-control:focus, .form-select:focus {
+  border-color: var(--cus-accent);
+  box-shadow: 0 0 0 0.2rem rgba(13, 148, 136, 0.15);
+}
+
+/* Toggle-button style radio group (Share modal "View Only" / "View & Download") */
+.toggle-btn-group { display: flex; gap: 0.6rem; }
+.toggle-btn-group .toggle-btn {
+  flex: 1;
+  text-align: center;
+  border: 1px solid var(--cus-border);
+  border-radius: 8px;
+  padding: 0.55rem;
+  font-weight: 600;
+  font-size: 0.88rem;
+  color: var(--cus-ink-soft);
+  cursor: pointer;
+  background: #fff;
+}
+.toggle-btn-group input { display: none; }
+.toggle-btn-group input:checked + .toggle-btn {
+  border-color: var(--cus-accent);
+  background: #f0fdfa;
+  color: var(--cus-accent-dark);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Version comparison ("redline") view — unchanged from before             */
+/* ---------------------------------------------------------------------- */
+
+.diff-view { font-size: 0.925rem; line-height: 1.6; }
+.diff-view p { margin-bottom: 0.75rem; }
+.diff-view .diff-equal { color: #212529; }
+.diff-view .diff-del {
+  background-color: #fbe4e4;
+  color: #7a1f1f;
+  text-decoration: line-through;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+.diff-view p.diff-del { display: block; padding: 0.25rem 0.5rem; }
+.diff-view .diff-ins { background-color: #e1f7e6; color: #1f6b30; padding: 0 2px; border-radius: 2px; }
+.diff-view p.diff-ins { display: block; padding: 0.25rem 0.5rem; }
+.diff-del-swatch, .diff-ins-swatch {
+  display: inline-block;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 2px;
+  vertical-align: middle;
+  margin-right: 2px;
+}
+.diff-del-swatch { background-color: #fbe4e4; }
+.diff-ins-swatch { background-color: #e1f7e6; }
+
+/* ── Dashboard analytics ─────────────────────────────────────────── */
+.live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cus-accent-light);
+  box-shadow: 0 0 0 rgba(20, 184, 166, 0.6);
+  animation: cus-live-pulse 2s infinite;
+}
+@keyframes cus-live-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.55); }
+  70%  { box-shadow: 0 0 0 8px rgba(20, 184, 166, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(20, 184, 166, 0); }
+}
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--cus-accent-dark);
+  text-transform: uppercase;
+}
+.chart-card-body {
+  position: relative;
+  padding: 1rem 1.25rem;
+}
+.chart-card-body canvas { max-height: 260px; }
+.chart-empty-state {
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cus-muted);
+  font-size: 0.875rem;
+}

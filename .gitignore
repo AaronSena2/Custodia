@@ -1,0 +1,19 @@
+# Uploaded documents — real client data, not source code. Backed up
+# separately (see the "Custodia Weekly Backup" scheduled task / OneDrive).
+/storage/*
+!/storage/.htaccess
+
+# Local Claude Code tooling config — machine-specific, not project source.
+/.claude/
+
+# Database backups, if ever created inside the project by mistake — these
+# must never live inside the web-servable tree (see includes/db.php's
+# config comments). The real backups live outside this folder entirely.
+/backups/
+*.sql
+*.tar.gz
+
+# OS/editor noise.
+Thumbs.db
+desktop.ini
+.DS_Store
