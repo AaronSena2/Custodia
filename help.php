@@ -248,4 +248,23 @@ require __DIR__ . '/includes/layout_header.php';
 
 </div>
 
+<script>
+// The chatbot's "Read more" links point at help.php#secX, but Bootstrap's
+// accordion sections are collapsed by default (only #secStart starts open)
+// — a bare #hash link would land on an invisible, height-0 section. Expand
+// whichever section the hash names, on both a fresh page load AND a
+// same-page hash change (clicking a second "Read more" link while already
+// on help.php only fires hashchange, not another page load).
+function custodiaExpandHelpSection() {
+  const id = location.hash.slice(1);
+  if (!id) return;
+  const target = document.getElementById(id);
+  if (!target || !target.classList.contains('accordion-collapse')) return;
+  bootstrap.Collapse.getOrCreateInstance(target, { toggle: false }).show();
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+document.addEventListener('DOMContentLoaded', custodiaExpandHelpSection);
+window.addEventListener('hashchange', custodiaExpandHelpSection);
+</script>
+
 <?php require __DIR__ . '/includes/layout_footer.php'; ?>

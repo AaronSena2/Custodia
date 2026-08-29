@@ -211,6 +211,60 @@ function custodia_register_physical_file(PDO $pdo, array $user, string $matterId
     }
 }
 
+/** RBAC matrix: "Edit Physical File Profile" — see includes/permissions.php's edit_physical_files entry. */
+function custodia_update_physical_file_profile(PDO $pdo, array $user, string $fileId, string $jacketLabel, string $barcode, ?string $locationId, string $ipAddress): array
+{
+    custodia_assert_permission($pdo, $user, 'edit_physical_files');
+
+    $stmt = $pdo->prepare('SELECT * FROM physical_files WHERE id = :id');
+    $stmt->execute(['id' => $fileId]);
+    $target = $stmt->fetch();
+    if (!$target) {
+        throw custodia_not_found('Physical file not found.');
+    }
+    custodia_assert_matter_access($pdo, $user, $target['matter_id']);
+
+    if ($barcode !== $target['barcode']) {
+        $dupeCheck = $pdo->prepare('SELECT id FROM physical_files WHERE barcode = :barcode AND id != :id');
+        $dupeCheck->execute(['barcode' => $barcode, 'id' => $fileId]);
+        if ($dupeCheck->fetch()) {
+            throw custodia_bad_request('Another physical file already uses that physical file number.');
+        }
+    }
+
+    // current_location_id is otherwise only ever written by includes/custody.php's
+    // check-out/check-in/transfer flow (NULL while issued, set on return) — only
+    // allow this form to touch it while the file is sitting IN_REGISTRY, so a
+    // profile edit can't silently desync location from custody status.
+    if ($locationId !== $target['current_location_id'] && $target['status'] !== 'IN_REGISTRY') {
+        throw custodia_bad_request('Location can only be changed while the file is In Registry — use a custody movement instead.');
+    }
+    if ($locationId !== null) {
+        $locCheck = $pdo->prepare('SELECT id FROM physical_locations WHERE id = :id');
+        $locCheck->execute(['id' => $locationId]);
+        if (!$locCheck->fetch()) {
+            throw custodia_bad_request('Selected location does not exist.');
+        }
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare('UPDATE physical_files SET jacket_label = :label, barcode = :barcode, current_location_id = :loc WHERE id = :id')
+            ->execute(['label' => $jacketLabel, 'barcode' => $barcode, 'loc' => $locationId, 'id' => $fileId]);
+
+        custodia_audit_record($pdo, [
+            'actorId' => $user['id'], 'actionType' => 'PHYSICAL_FILE_PROFILE_UPDATED', 'entityType' => 'PHYSICAL_FILE', 'entityId' => $fileId,
+            'ipAddress' => $ipAddress,
+            'metadata' => ['previousBarcode' => $target['barcode']],
+        ]);
+        $pdo->commit();
+        return ['id' => $fileId];
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+
 /** Lifecycle status (Open/Closed) — independent of custody status, see includes/permissions.php's close_physical_files entry. */
 function custodia_close_physical_file(PDO $pdo, array $user, string $fileId, string $ipAddress): array
 {
@@ -276,5 +330,69 @@ function custodia_reopen_physical_file(PDO $pdo, array $user, string $fileId, st
 
 function custodia_list_physical_locations(PDO $pdo): array
 {
-    return $pdo->query('SELECT * FROM physical_locations ORDER BY building ASC, room ASC')->fetchAll();
+    return $pdo->query(
+        'SELECT pl.*, (SELECT COUNT(*) FROM physical_files WHERE current_location_id = pl.id) AS file_count
+         FROM physical_locations pl ORDER BY pl.building ASC, pl.room ASC'
+    )->fetchAll();
+}
+
+const CUSTODIA_LOCATION_TYPES = ['ACTIVE_SHELF', 'ARCHIVE_ROOM', 'OFFSITE_FACILITY'];
+
+/** RBAC matrix: "Manage Physical Locations" — see includes/permissions.php's manage_physical_locations entry. */
+function custodia_create_physical_location(PDO $pdo, array $user, string $building, string $room, string $shelf, ?string $bin, string $locationType, string $ipAddress): array
+{
+    custodia_assert_permission($pdo, $user, 'manage_physical_locations');
+
+    if (!in_array($locationType, CUSTODIA_LOCATION_TYPES, true)) {
+        throw custodia_bad_request('Invalid location type.');
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $id = custodia_uuid();
+        $pdo->prepare('INSERT INTO physical_locations (id, building, room, shelf, bin, location_type) VALUES (:id, :building, :room, :shelf, :bin, :type)')
+            ->execute(['id' => $id, 'building' => $building, 'room' => $room, 'shelf' => $shelf, 'bin' => $bin, 'type' => $locationType]);
+
+        custodia_audit_record($pdo, [
+            'actorId' => $user['id'], 'actionType' => 'PHYSICAL_LOCATION_CREATED', 'entityType' => 'PHYSICAL_LOCATION', 'entityId' => $id,
+            'ipAddress' => $ipAddress,
+        ]);
+        $pdo->commit();
+        return ['id' => $id];
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+
+/** RBAC matrix: "Manage Physical Locations" — see includes/permissions.php's manage_physical_locations entry. */
+function custodia_update_physical_location(PDO $pdo, array $user, string $locationId, string $building, string $room, string $shelf, ?string $bin, string $locationType, string $ipAddress): array
+{
+    custodia_assert_permission($pdo, $user, 'manage_physical_locations');
+
+    if (!in_array($locationType, CUSTODIA_LOCATION_TYPES, true)) {
+        throw custodia_bad_request('Invalid location type.');
+    }
+
+    $stmt = $pdo->prepare('SELECT id FROM physical_locations WHERE id = :id');
+    $stmt->execute(['id' => $locationId]);
+    if (!$stmt->fetch()) {
+        throw custodia_not_found('Physical location not found.');
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare('UPDATE physical_locations SET building = :building, room = :room, shelf = :shelf, bin = :bin, location_type = :type WHERE id = :id')
+            ->execute(['building' => $building, 'room' => $room, 'shelf' => $shelf, 'bin' => $bin, 'type' => $locationType, 'id' => $locationId]);
+
+        custodia_audit_record($pdo, [
+            'actorId' => $user['id'], 'actionType' => 'PHYSICAL_LOCATION_UPDATED', 'entityType' => 'PHYSICAL_LOCATION', 'entityId' => $locationId,
+            'ipAddress' => $ipAddress,
+        ]);
+        $pdo->commit();
+        return ['id' => $locationId];
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
 }

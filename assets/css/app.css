@@ -701,3 +701,313 @@ a:hover { color: var(--cus-accent); }
   color: var(--cus-muted);
   font-size: 0.875rem;
 }
+
+/* ==========================================================================
+   Dashboard "at a glance" layout, modeled on the Microsoft 365 admin center
+   dashboard's card structure (compact stat cards with inline sparklines/
+   bars, and a filterable "Top actions" card grid with status pills) but
+   kept in this app's existing light theme — reuses the --cus-* tokens
+   defined at the top of this file rather than a separate dark palette.
+   ========================================================================== */
+
+.m365-dash {
+  --m365-bg: var(--cus-bg);
+  --m365-card: var(--cus-card);
+  --m365-border: var(--cus-border);
+  --m365-text: var(--cus-ink);
+  --m365-muted: var(--cus-muted);
+  --m365-accent: var(--cus-accent);
+  color: var(--m365-text);
+}
+
+.m365-dash .live-badge { color: var(--cus-accent-dark); }
+
+.m365-analytics-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 700;
+  color: var(--m365-text);
+}
+.m365-analytics-toggle:hover { color: var(--cus-accent-dark); }
+.m365-analytics-toggle .m365-chevron { transition: transform 0.2s ease; flex-shrink: 0; }
+.m365-analytics-toggle.collapsed .m365-chevron { transform: rotate(-90deg); }
+
+.m365-section-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-bottom: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.m365-glance-row {
+  display: grid;
+  /* auto-fit (not a fixed repeat(4,...)) so a role with fewer visible
+     glance cards reflows cleanly instead of leaving empty grid cells —
+     see dashboard.php's $showUsersWidget/$showGroupsWidgets gating. */
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.75rem;
+}
+
+.m365-card {
+  background: var(--m365-card);
+  border: 1px solid var(--m365-border);
+  border-radius: 12px;
+  padding: 1.1rem 1.25rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex-direction: column;
+}
+
+.m365-card-label { font-weight: 700; font-size: 0.9rem; }
+.m365-card-sub { color: var(--m365-muted); font-size: 0.78rem; margin-bottom: 0.6rem; }
+.m365-card-value { font-size: 1.8rem; font-weight: 800; margin-bottom: 0.75rem; }
+
+.m365-card-section-title {
+  color: var(--m365-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.m365-kpi-row { display: flex; gap: 1.5rem; margin-bottom: 0.9rem; }
+.m365-kpi-row .m365-kpi-value { font-size: 1.3rem; font-weight: 800; }
+.m365-kpi-row .m365-kpi-label { color: var(--m365-muted); font-size: 0.72rem; }
+
+.m365-bar-list { display: flex; flex-direction: column; gap: 0.55rem; margin-bottom: 0.5rem; }
+.m365-bar-row { font-size: 0.78rem; }
+.m365-bar-row .m365-bar-row-top { display: flex; justify-content: space-between; margin-bottom: 3px; color: var(--m365-muted); }
+.m365-bar-track { height: 6px; border-radius: 3px; background: var(--m365-border); overflow: hidden; }
+.m365-bar-fill { height: 100%; border-radius: 3px; background: var(--m365-accent); }
+
+.m365-trend-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.m365-trend-list .m365-trend-name { font-size: 0.82rem; color: var(--m365-text); }
+.m365-trend-list .m365-trend-meta { font-size: 0.72rem; color: var(--m365-muted); }
+
+.m365-card-actions { margin-top: auto; padding-top: 0.9rem; display: flex; gap: 0.5rem; }
+
+.m365-btn-outline {
+  background: transparent;
+  border: 1px solid var(--m365-border);
+  color: var(--m365-text);
+  font-size: 0.78rem;
+  padding: 0.35rem 0.75rem;
+}
+.m365-btn-outline:hover { background: rgba(15, 23, 42, 0.04); color: var(--m365-text); border-color: var(--m365-muted); }
+
+.m365-sparkline-wrap { height: 70px; margin-bottom: 0.75rem; }
+
+.m365-pills { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.1rem; }
+.m365-pill {
+  background: transparent;
+  border: 1px solid var(--m365-border);
+  color: var(--m365-muted);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.85rem;
+}
+.m365-pill:hover { border-color: var(--m365-accent); color: var(--m365-text); }
+.m365-pill.active { background: var(--m365-accent); border-color: var(--m365-accent); color: #052e2b; font-weight: 700; }
+
+.m365-actions-grid {
+  display: grid;
+  /* auto-fit for the same reason as .m365-glance-row above — the Practice
+     Groups/Access Requests action cards are also role-gated. */
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.m365-action-card {
+  background: var(--m365-card);
+  border: 1px solid var(--m365-border);
+  border-radius: 12px;
+  padding: 1.1rem 1.25rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex-direction: column;
+}
+
+.m365-action-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.6rem; }
+.m365-action-category { color: var(--m365-muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 700; }
+.m365-action-title { font-weight: 700; font-size: 0.95rem; margin-bottom: 0.6rem; line-height: 1.3; }
+.m365-action-body { flex: 1; font-size: 0.78rem; color: var(--m365-muted); margin-bottom: 0.75rem; }
+.m365-action-body-row { display: flex; justify-content: space-between; padding: 0.25rem 0; border-bottom: 1px solid var(--m365-border); }
+.m365-action-body-row:last-child { border-bottom: none; }
+
+.m365-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.m365-badge-critical { background: var(--cus-danger); color: #ffffff; }
+.m365-badge-needs-action { background: #fffbeb; border-color: #fde68a; color: #b45309; }
+.m365-badge-recommended { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+.m365-badge-healthy { background: #ecfdf5; border-color: #bbf7d0; color: #15803d; }
+
+.m365-dash .text-muted { color: var(--m365-muted) !important; }
+.m365-dash .chart-empty-state { color: var(--m365-muted); }
+
+
+/* ==========================================================================
+   Guide chatbot — a floating widget present on every authenticated page
+   (added once in includes/layout_footer.php). The app's first fixed-
+   position element, so it deliberately sits at Bootstrap's own "fixed/
+   sticky" z-index tier (1030) rather than inventing a new one — a later-
+   opened Bootstrap modal (1050) still layers correctly above it.
+   ========================================================================== */
+
+.chatbot-fab {
+  position: fixed;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  z-index: 1030;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: none;
+  background: var(--cus-accent);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.25);
+}
+.chatbot-fab:hover { background: var(--cus-accent-dark); }
+
+.chatbot-panel {
+  position: fixed;
+  right: 1.5rem;
+  bottom: 5.5rem;
+  z-index: 1030;
+  width: 340px;
+  max-width: calc(100vw - 2rem);
+  max-height: 480px;
+  background: var(--cus-card);
+  border: 1px solid var(--cus-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chatbot-panel-header {
+  background: var(--cus-sidebar-bg);
+  color: #ffffff;
+  padding: 0.7rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.chatbot-close {
+  background: none;
+  border: none;
+  color: #ffffff;
+  font-size: 1.2rem;
+  line-height: 1;
+  opacity: 0.8;
+}
+.chatbot-close:hover { opacity: 1; }
+
+.chatbot-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-height: 180px;
+}
+
+.chatbot-bubble {
+  max-width: 85%;
+  padding: 0.5rem 0.7rem;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.chatbot-bubble-bot {
+  align-self: flex-start;
+  background: var(--cus-bg);
+  border: 1px solid var(--cus-border);
+  color: var(--cus-ink);
+}
+.chatbot-bubble-user {
+  align-self: flex-end;
+  background: var(--cus-accent);
+  color: #ffffff;
+}
+.chatbot-bubble-error {
+  border-color: #fecaca;
+  background: #fff7f7;
+  color: var(--cus-danger);
+}
+.chatbot-bubble-link {
+  display: inline-block;
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.chatbot-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0 0.85rem 0.6rem;
+}
+.chatbot-chip {
+  background: var(--cus-bg);
+  border: 1px solid var(--cus-border);
+  color: var(--cus-ink-soft);
+  border-radius: 999px;
+  font-size: 0.74rem;
+  padding: 0.3rem 0.7rem;
+  text-align: left;
+}
+.chatbot-chip:hover { border-color: var(--cus-accent); color: var(--cus-accent-dark); }
+
+.chatbot-input-row {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.65rem 0.85rem;
+  border-top: 1px solid var(--cus-border);
+}
+.chatbot-input-row input {
+  flex: 1;
+  border: 1px solid var(--cus-border);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
+  min-width: 0;
+}
+.chatbot-input-row input:focus { outline: none; border-color: var(--cus-accent); }
+.chatbot-send {
+  background: var(--cus-accent);
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  width: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.chatbot-send:hover { background: var(--cus-accent-dark); }
+
+@media (max-width: 900px) {
+  .chatbot-fab { right: 1rem; bottom: 1rem; }
+  .chatbot-panel { right: 1rem; left: 1rem; width: auto; bottom: 4.75rem; }
+}

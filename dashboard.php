@@ -7,14 +7,12 @@ require_once __DIR__ . '/includes/physical_files.php';
 require_once __DIR__ . '/includes/custody.php';
 require_once __DIR__ . '/includes/access_requests.php';
 require_once __DIR__ . '/includes/analytics.php';
+require_once __DIR__ . '/includes/clients.php';
 
 $user = custodia_require_login();
 $pdo = custodia_db();
 
 $analytics = custodia_dashboard_analytics($pdo, $user);
-
-$matters = custodia_list_matters_for_user($pdo, $user);
-$activeMatters = array_values(array_filter($matters, fn($m) => $m['status'] === 'ACTIVE'));
 
 $overdueFiles = custodia_list_overdue_files($pdo, $user);
 $pendingMovements = custodia_list_pending_for_approver($pdo, $user);
@@ -22,14 +20,40 @@ $pendingAccessRequests = custodia_list_pending_access_requests_for_approver($pdo
 $destructionReviews = array_values(array_filter($pendingAccessRequests, fn($r) => $r['request_type'] === 'DESTRUCTION_REVIEW'));
 $accessOnly = array_values(array_filter($pendingAccessRequests, fn($r) => $r['request_type'] !== 'DESTRUCTION_REVIEW'));
 
-$byPracticeArea = [];
-foreach ($activeMatters as $m) {
-    $byPracticeArea[$m['practice_area']] = ($byPracticeArea[$m['practice_area']] ?? 0) + 1;
-}
-$maxCount = max(1, ...array_values($byPracticeArea) ?: [1]);
+$mostRequestedMatters = custodia_analytics_most_requested_matters($pdo, $user);
+$mostRequestedFiles = custodia_analytics_most_requested_files($pdo, $user);
+$mostRequestedClients = custodia_analytics_most_requested_clients($pdo, $user);
+$latestDocuments = custodia_analytics_latest_documents($pdo, $user);
+$mostRequestedTotal = array_sum(array_column($mostRequestedMatters, 'count'))
+    + array_sum(array_column($mostRequestedFiles, 'count'))
+    + array_sum(array_column($mostRequestedClients, 'count'));
+
+$clients = custodia_list_clients($pdo, $user);
+$clientsWithoutMatters = array_values(array_filter($clients, fn($c) => (int) $c['matter_count'] === 0));
+
+$groupsWithNoMembers = array_values(array_filter($analytics['groupComparison'], fn($g) => $g['memberCount'] === 0));
 
 $pendingApprovalsCount = count($pendingMovements) + count($accessOnly);
 $checkedOutCount = custodia_count_checked_out_files($pdo, $user);
+
+// Role-based dashboard visibility: System Admin/Records Manager (firm-wide
+// roles) always see everything; everyone else sees only the widgets
+// relevant to their own responsibility. Permission-driven, not role-name-
+// hardcoded (beyond the firm-wide-roles concept this codebase already uses
+// for matter visibility), so it works correctly for custom roles with no
+// special-casing — same discipline as the chatbot's chip visibility and the
+// dashboard analytics firm-wide fast path added earlier this session.
+$isFirmWide = in_array($user['role'], custodia_firm_wide_roles(), true);
+$showUsersWidget = $isFirmWide || custodia_user_has_permission($pdo, $user, 'manage_users');
+$showGroupsWidgets = $isFirmWide || custodia_user_has_permission($pdo, $user, 'manage_practice_groups');
+$showAuditOversight = $isFirmWide || custodia_user_has_permission($pdo, $user, 'export_audit_log') || custodia_user_has_permission($pdo, $user, 'verify_audit_chain');
+$showRequestOversight = $isFirmWide || custodia_user_has_permission($pdo, $user, 'decide_access_requests');
+
+/** Renders a Top Actions status pill — variant is one of critical|needs-action|recommended|healthy. */
+function custodia_m365_badge(string $label, string $variant): string
+{
+    return '<span class="m365-badge m365-badge-' . e($variant) . '">' . e($label) . '</span>';
+}
 
 $pageTitle = 'Dashboard';
 $activeNav = 'dashboard';
@@ -44,155 +68,325 @@ require __DIR__ . '/includes/layout_header.php';
   </form>
 </div>
 
-<div class="row g-3 mb-4">
-  <div class="col-md-3">
-    <div class="stat-tile">
-      <div class="stat-label">Files Issued</div>
-      <div class="stat-value"><?= $checkedOutCount ?></div>
-    </div>
-  </div>
-  <div class="col-md-3">
-    <div class="stat-tile stat-tile-alert">
-      <div class="stat-label">Overdue Returns</div>
-      <div class="stat-value"><?= count($overdueFiles) ?></div>
-    </div>
-  </div>
-  <div class="col-md-3">
-    <div class="stat-tile">
-      <div class="stat-label">Pending Approvals</div>
-      <div class="stat-value"><?= $pendingApprovalsCount ?></div>
-    </div>
-  </div>
-  <div class="col-md-3">
-    <div class="stat-tile">
-      <div class="stat-label">Pending Destruction Review</div>
-      <div class="stat-value"><?= count($destructionReviews) ?></div>
-    </div>
-  </div>
-</div>
+<div class="m365-dash">
 
-<div class="d-flex align-items-center justify-content-between mb-2">
-  <div class="fw-semibold">Analytics</div>
-  <span class="live-badge"><span class="live-dot"></span> Live</span>
-</div>
+  <div class="m365-section-title">
+    <span>Your organization at a glance</span>
+    <span class="live-badge"><span class="live-dot"></span> Live</span>
+  </div>
 
-<div class="row g-3 mb-3">
-  <div class="col-lg-8">
-    <div class="card h-100">
-      <div class="card-header bg-white fw-semibold">Activity Over Time <span class="text-muted fw-normal small">— last 30 days</span></div>
-      <div class="chart-card-body">
-        <canvas id="activityChart" height="90"></canvas>
+  <div class="m365-glance-row">
+    <?php if ($showUsersWidget): ?>
+    <div class="m365-card">
+      <div class="m365-card-label">Users in your firm</div>
+      <div class="m365-card-sub">Active users across all roles</div>
+      <div class="m365-card-value" id="glanceUserCount">—</div>
+      <div class="m365-card-section-title">Roles by type</div>
+      <div id="glanceRoleBars" class="m365-bar-list"></div>
+      <div class="m365-card-actions">
+        <a href="admin.php?tab=users" class="btn btn-sm m365-btn-outline">Manage Users</a>
       </div>
     </div>
-  </div>
-  <div class="col-lg-4">
-    <div class="card h-100">
-      <div class="card-header bg-white fw-semibold">File Types</div>
-      <div class="chart-card-body">
-        <canvas id="fileTypeChart" height="90"></canvas>
-        <div id="fileTypeEmpty" class="chart-empty-state d-none">No documents yet.</div>
-      </div>
-    </div>
-  </div>
-</div>
+    <?php endif; ?>
 
-<div class="row g-3 mb-4">
-  <div class="col-lg-6">
-    <div class="card h-100">
-      <div class="card-header bg-white fw-semibold">Most Accessed Documents</div>
-      <div class="chart-card-body">
-        <canvas id="mostAccessedChart" height="110"></canvas>
-        <div id="mostAccessedEmpty" class="chart-empty-state d-none">No downloads recorded yet.</div>
+    <div class="m365-card">
+      <div class="m365-card-label">Matters</div>
+      <div class="m365-card-sub">Opened — last 30 days</div>
+      <div class="m365-card-value" id="glanceMattersCount">—</div>
+      <div class="m365-sparkline-wrap"><canvas id="mattersSparkline"></canvas></div>
+      <div class="m365-card-actions">
+        <a href="matters.php" class="btn btn-sm m365-btn-outline">View Matters</a>
       </div>
     </div>
-  </div>
-  <div class="col-lg-6">
-    <div class="card h-100">
-      <div class="card-header bg-white fw-semibold">Activity by Type</div>
-      <div class="chart-card-body">
-        <canvas id="actionTypeChart" height="110"></canvas>
-        <div id="actionTypeEmpty" class="chart-empty-state d-none">No audit activity in your view yet.</div>
-      </div>
-    </div>
-  </div>
-</div>
 
-<div class="row g-3 mb-4">
-  <div class="col-lg-8">
-    <div class="card h-100">
-      <div class="card-header d-flex justify-content-between align-items-center bg-white">
-        <span class="fw-semibold">Overdue Returns</span>
-        <a href="approvals.php" class="small">View all</a>
+    <?php if ($showGroupsWidgets): ?>
+    <div class="m365-card">
+      <div class="m365-card-label">Practice Groups</div>
+      <div class="m365-card-sub">Team coverage across the firm</div>
+      <div class="m365-kpi-row" id="glanceGroupKpis"></div>
+      <div class="m365-card-section-title">Groups with most team members</div>
+      <div id="glanceGroupBars" class="m365-bar-list"></div>
+      <div class="m365-card-actions">
+        <a href="admin.php?tab=practicegroups" class="btn btn-sm m365-btn-outline">Manage Groups</a>
       </div>
-      <div class="card-body p-0">
+    </div>
+    <?php endif; ?>
+
+    <div class="m365-card">
+      <div class="m365-card-label">Activity</div>
+      <div class="m365-card-sub">Audit events — last 30 days</div>
+      <div class="m365-card-value" id="glanceActivityCount">—</div>
+      <div class="m365-card-section-title">Trending users</div>
+      <div id="glanceTrendingUsers" class="m365-trend-list"></div>
+      <div class="m365-card-actions">
+        <a href="audit.php" class="btn btn-sm m365-btn-outline">View Audit Log</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="m365-section-title">
+    <span>Top actions</span>
+  </div>
+  <div class="m365-pills">
+    <button type="button" class="m365-pill active" data-filter="all">All</button>
+    <button type="button" class="m365-pill" data-filter="physical">Physical Registry</button>
+    <button type="button" class="m365-pill" data-filter="security">Security</button>
+    <button type="button" class="m365-pill" data-filter="compliance">Compliance</button>
+    <button type="button" class="m365-pill" data-filter="documents">Documents</button>
+    <button type="button" class="m365-pill" data-filter="clients">Clients</button>
+  </div>
+
+  <div class="m365-actions-grid" id="m365ActionsGrid">
+
+    <div class="m365-action-card" data-category="physical">
+      <div class="m365-action-card-top">
+        <span class="m365-action-category">Physical Registry</span>
+        <?= custodia_m365_badge(count($overdueFiles) > 0 ? 'Critical' : 'Healthy', count($overdueFiles) > 0 ? 'critical' : 'healthy') ?>
+      </div>
+      <div class="m365-action-title"><?= count($overdueFiles) ?> file<?= count($overdueFiles) === 1 ? '' : 's' ?> overdue</div>
+      <div class="m365-action-body">
         <?php if (empty($overdueFiles)): ?>
-          <div class="text-center text-muted py-5">No overdue files. Nice work.</div>
+          No overdue files. Nice work.
         <?php else: ?>
-          <table class="table table-hover mb-0 align-middle">
-            <thead class="table-light">
-              <tr><th>File</th><th>Matter</th><th>Custodian</th><th>Overdue</th></tr>
-            </thead>
-            <tbody>
-              <?php foreach ($overdueFiles as $f): $days = custodia_days_overdue($f['due_back_at']); ?>
-                <tr onclick="window.location='matter.php?id=<?= e($f['matter_id']) ?>'" class="table-clickable-row">
-                  <td>
-                    <span class="barcode-display text-muted small"><?= e($f['barcode']) ?></span><br>
-                    <span class="small"><?= e($f['jacket_label']) ?></span>
-                  </td>
-                  <td><?= e($f['client_name']) ?></td>
-                  <td><?= e($f['custodian_name'] ?? '—') ?></td>
-                  <td><span class="badge text-bg-danger"><?= $days ?> day<?= $days === 1 ? '' : 's' ?></span></td>
-                </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
-        <?php endif; ?>
-      </div>
-    </div>
-  </div>
-
-  <div class="col-lg-4 d-flex flex-column gap-3">
-    <div class="card">
-      <div class="card-header bg-white fw-semibold">Pending Destruction Review</div>
-      <div class="card-body">
-        <?php if (empty($destructionReviews)): ?>
-          <div class="text-muted small text-center py-3">Nothing flagged right now.</div>
-        <?php else: ?>
-          <?php foreach ($destructionReviews as $r): ?>
-            <div class="border-bottom py-2 small"><?= e($r['reason']) ?></div>
+          <?php foreach (array_slice($overdueFiles, 0, 3) as $f): ?>
+            <div class="m365-action-body-row"><span><?= e($f['barcode']) ?></span><span><?= custodia_days_overdue($f['due_back_at']) ?>d</span></div>
           <?php endforeach; ?>
         <?php endif; ?>
       </div>
+      <div class="m365-card-actions"><a href="approvals.php" class="btn btn-sm m365-btn-outline">View all issues</a></div>
     </div>
 
-    <a href="scan.php" class="card scan-cta-card text-white text-decoration-none">
-      <div class="card-body">
-        <div class="fw-semibold mb-1">▦ Registry Scan Station</div>
-        <p class="small text-white-50 mb-0">Jump straight to the issue/return counter for the file room.</p>
+    <div class="m365-action-card" data-category="physical">
+      <div class="m365-action-card-top">
+        <span class="m365-action-category">Custody Movements</span>
+        <?= custodia_m365_badge(count($pendingMovements) > 0 ? 'Needs action' : 'Healthy', count($pendingMovements) > 0 ? 'needs-action' : 'healthy') ?>
       </div>
-    </a>
-  </div>
-</div>
+      <div class="m365-action-title"><?= count($pendingMovements) ?> movement<?= count($pendingMovements) === 1 ? '' : 's' ?> pending approval</div>
+      <div class="m365-action-body">Issue/return, transfer, and archive requests waiting on a decision.</div>
+      <div class="m365-card-actions"><a href="approvals.php" class="btn btn-sm m365-btn-outline">Review approvals</a></div>
+    </div>
 
-<div class="card">
-  <div class="card-header bg-white fw-semibold">Active Matters by Practice Area</div>
-  <div class="card-body">
-    <?php if (empty($byPracticeArea)): ?>
-      <div class="text-muted text-center py-3">No active matters yet.</div>
-    <?php else: ?>
-      <?php foreach ($byPracticeArea as $area => $count): ?>
-        <div class="row align-items-center mb-2 g-2">
-          <div class="col-2 small text-muted"><?= e($area) ?></div>
-          <div class="col-9">
-            <div class="progress" style="height: 10px;">
-              <div class="progress-bar" style="width: <?= ($count / $maxCount) * 100 ?>%"></div>
-            </div>
-          </div>
-          <div class="col-1 small text-muted text-end"><?= $count ?></div>
+    <div class="m365-action-card" data-category="security">
+      <div class="m365-action-card-top">
+        <span class="m365-action-category">Security</span>
+        <?= custodia_m365_badge(count($accessOnly) > 0 ? 'Needs action' : 'Healthy', count($accessOnly) > 0 ? 'needs-action' : 'healthy') ?>
+      </div>
+      <div class="m365-action-title"><?= count($accessOnly) ?> access request<?= count($accessOnly) === 1 ? '' : 's' ?> pending</div>
+      <div class="m365-action-body">Confidential matter and document access requests awaiting review.</div>
+      <div class="m365-card-actions"><a href="approvals.php" class="btn btn-sm m365-btn-outline">Review requests</a></div>
+    </div>
+
+    <div class="m365-action-card" data-category="compliance">
+      <div class="m365-action-card-top">
+        <span class="m365-action-category">Compliance</span>
+        <?= custodia_m365_badge(count($destructionReviews) > 0 ? 'Needs action' : 'Healthy', count($destructionReviews) > 0 ? 'needs-action' : 'healthy') ?>
+      </div>
+      <div class="m365-action-title"><?= count($destructionReviews) ?> pending destruction review</div>
+      <div class="m365-action-body">Retention-flagged files waiting on a keep/destroy decision.</div>
+      <div class="m365-card-actions"><a href="approvals.php" class="btn btn-sm m365-btn-outline">Review</a></div>
+    </div>
+
+    <?php if ($showGroupsWidgets): ?>
+    <div class="m365-action-card" data-category="security">
+      <div class="m365-action-card-top">
+        <span class="m365-action-category">Practice Groups</span>
+        <?= custodia_m365_badge(count($groupsWithNoMembers) > 0 ? 'Needs action' : 'Healthy', count($groupsWithNoMembers) > 0 ? 'needs-action' : 'healthy') ?>
+      </div>
+      <div class="m365-action-title"><?= count($groupsWithNoMembers) ?> of <?= count($analytics['groupComparison']) ?> groups have no members</div>
+      <div class="m365-action-body">
+        <?php if (empty($groupsWithNoMembers)): ?>
+          Every practice group has at least one member.
+        <?php else: ?>
+          <?php foreach (array_slice($groupsWithNoMembers, 0, 3) as $g): ?>
+            <div class="m365-action-body-row"><span><?= e($g['name']) ?></span><span>0 members</span></div>
+          <?php endforeach; ?>
+        <?php endif; ?>
+      </div>
+      <div class="m365-card-actions"><a href="admin.php?tab=practicegroups" class="btn btn-sm m365-btn-outline">Manage groups</a></div>
+    </div>
+    <?php endif; ?>
+
+    <div class="m365-action-card" data-category="documents">
+      <div class="m365-action-card-top">
+        <span class="m365-action-category">Digital Documents</span>
+        <?= custodia_m365_badge(empty($latestDocuments) ? 'Recommended' : 'Healthy', empty($latestDocuments) ? 'recommended' : 'healthy') ?>
+      </div>
+      <div class="m365-action-title"><?= empty($latestDocuments) ? 'No documents uploaded yet' : count($latestDocuments) . ' recently added' ?></div>
+      <div class="m365-action-body">
+        <?php if (empty($latestDocuments)): ?>
+          Get started by uploading documents to a matter.
+        <?php else: ?>
+          <?php foreach (array_slice($latestDocuments, 0, 3) as $d): ?>
+            <div class="m365-action-body-row"><span><?= e($d['title']) ?></span><span><?= e(date('M j', strtotime($d['created_at']))) ?></span></div>
+          <?php endforeach; ?>
+        <?php endif; ?>
+      </div>
+      <div class="m365-card-actions"><a href="documents.php" class="btn btn-sm m365-btn-outline">Upload documents</a></div>
+    </div>
+
+    <?php if ($showRequestOversight): ?>
+    <div class="m365-action-card" data-category="documents">
+      <div class="m365-action-card-top">
+        <span class="m365-action-category">Access Requests</span>
+        <?= custodia_m365_badge('Healthy', 'healthy') ?>
+      </div>
+      <div class="m365-action-title"><?= $mostRequestedTotal ?> request<?= $mostRequestedTotal === 1 ? '' : 's' ?> logged</div>
+      <div class="m365-action-body">
+        <?php if ($mostRequestedTotal === 0): ?>
+          No access requests logged yet.
+        <?php else: ?>
+          <?php foreach (array_slice($mostRequestedMatters, 0, 3) as $r): ?>
+            <div class="m365-action-body-row"><span><?= e($r['label']) ?></span><span><?= $r['count'] ?></span></div>
+          <?php endforeach; ?>
+        <?php endif; ?>
+      </div>
+      <div class="m365-card-actions"><a href="approvals.php" class="btn btn-sm m365-btn-outline">View requests</a></div>
+    </div>
+    <?php endif; ?>
+
+    <div class="m365-action-card" data-category="clients">
+      <div class="m365-action-card-top">
+        <span class="m365-action-category">Clients</span>
+        <?= custodia_m365_badge('Healthy', 'healthy') ?>
+      </div>
+      <div class="m365-action-title"><?= count($clients) ?> clients on file</div>
+      <div class="m365-action-body">
+        <?= count($clientsWithoutMatters) ?> client<?= count($clientsWithoutMatters) === 1 ? '' : 's' ?> with no matters yet. All clients and matters are being tracked normally.
+      </div>
+      <div class="m365-card-actions"><a href="clients.php" class="btn btn-sm m365-btn-outline">View clients</a></div>
+    </div>
+
+  </div>
+
+  <div class="d-flex align-items-center justify-content-between mt-4 mb-2">
+    <button type="button" class="m365-analytics-toggle" data-bs-toggle="collapse" data-bs-target="#analyticsSection" aria-expanded="true" aria-controls="analyticsSection">
+      <svg class="m365-chevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      Analytics
+    </button>
+    <span class="live-badge"><span class="live-dot"></span> Live</span>
+  </div>
+
+  <div class="collapse show" id="analyticsSection">
+
+  <div class="row g-3 mb-3">
+    <div class="col-lg-8">
+      <div class="card h-100">
+        <div class="card-header bg-white fw-semibold">Activity Over Time <span class="text-muted fw-normal small">— last 30 days</span></div>
+        <div class="chart-card-body">
+          <canvas id="activityChart" height="90"></canvas>
         </div>
-      <?php endforeach; ?>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="card h-100">
+        <div class="card-header bg-white fw-semibold">File Types</div>
+        <div class="chart-card-body">
+          <canvas id="fileTypeChart" height="90"></canvas>
+          <div id="fileTypeEmpty" class="chart-empty-state d-none">No documents yet.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-lg-6">
+      <div class="card h-100">
+        <div class="card-header bg-white fw-semibold">Most Accessed Documents</div>
+        <div class="chart-card-body">
+          <canvas id="mostAccessedChart" height="110"></canvas>
+          <div id="mostAccessedEmpty" class="chart-empty-state d-none">No downloads recorded yet.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card h-100">
+        <div class="card-header bg-white fw-semibold">Activity by Type</div>
+        <div class="chart-card-body">
+          <canvas id="actionTypeChart" height="110"></canvas>
+          <div id="actionTypeEmpty" class="chart-empty-state d-none">No audit activity in your view yet.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <?php if ($showAuditOversight || $showGroupsWidgets): ?>
+  <div class="row g-3 mb-3">
+    <?php if ($showAuditOversight): ?>
+    <div class="<?= $showGroupsWidgets ? 'col-lg-6' : 'col-lg-12' ?>">
+      <div class="card h-100">
+        <div class="card-header bg-white fw-semibold">Top Users</div>
+        <div class="chart-card-body">
+          <canvas id="topUsersChart" height="110"></canvas>
+          <div id="topUsersEmpty" class="chart-empty-state d-none">No activity in your view yet.</div>
+        </div>
+      </div>
+    </div>
+    <?php endif; ?>
+    <?php if ($showGroupsWidgets): ?>
+    <div class="<?= $showAuditOversight ? 'col-lg-6' : 'col-lg-12' ?>">
+      <div class="card h-100">
+        <div class="card-header bg-white fw-semibold">Group / Team Comparison <span class="text-muted fw-normal small">— team size vs. active matter workload</span></div>
+        <div class="chart-card-body">
+          <canvas id="groupComparisonChart" height="110"></canvas>
+          <div id="groupComparisonEmpty" class="chart-empty-state d-none">No practice groups yet.</div>
+        </div>
+      </div>
+    </div>
     <?php endif; ?>
   </div>
+  <?php endif; ?>
+
+  <?php if ($showRequestOversight): ?>
+  <div class="card">
+    <div class="card-header bg-white fw-semibold">Most Requested</div>
+    <div class="card-body">
+      <div class="row g-4">
+        <div class="col-md-4">
+          <div class="small text-muted fw-semibold mb-2">Matters</div>
+          <?php if (empty($mostRequestedMatters)): ?>
+            <div class="text-muted small py-2">No access requests yet.</div>
+          <?php else: ?>
+            <?php foreach ($mostRequestedMatters as $r): ?>
+              <div class="d-flex justify-content-between align-items-center border-bottom py-2 small">
+                <span><?= e($r['label']) ?></span>
+                <span class="badge text-bg-light"><?= $r['count'] ?></span>
+              </div>
+            <?php endforeach; ?>
+          <?php endif; ?>
+        </div>
+        <div class="col-md-4">
+          <div class="small text-muted fw-semibold mb-2">Files</div>
+          <?php if (empty($mostRequestedFiles)): ?>
+            <div class="text-muted small py-2">No access requests yet.</div>
+          <?php else: ?>
+            <?php foreach ($mostRequestedFiles as $r): ?>
+              <div class="d-flex justify-content-between align-items-center border-bottom py-2 small">
+                <span><?= e($r['label']) ?></span>
+                <span class="badge text-bg-light"><?= $r['count'] ?></span>
+              </div>
+            <?php endforeach; ?>
+          <?php endif; ?>
+        </div>
+        <div class="col-md-4">
+          <div class="small text-muted fw-semibold mb-2">Clients</div>
+          <?php if (empty($mostRequestedClients)): ?>
+            <div class="text-muted small py-2">No access requests yet.</div>
+          <?php else: ?>
+            <?php foreach ($mostRequestedClients as $r): ?>
+              <div class="d-flex justify-content-between align-items-center border-bottom py-2 small">
+                <span><?= e($r['label']) ?></span>
+                <span class="badge text-bg-light"><?= $r['count'] ?></span>
+              </div>
+            <?php endforeach; ?>
+          <?php endif; ?>
+        </div>
+      </div>
+    </div>
+  </div>
+  <?php endif; ?>
+
+  </div>
+
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -222,12 +416,81 @@ function custodiaFormatDay(iso) {
 }
 
 function custodiaToggleEmpty(canvasId, emptyId, isEmpty) {
-  document.getElementById(canvasId).classList.toggle('d-none', isEmpty);
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return; // widget hidden for this viewer's role — nothing to toggle
+  canvas.classList.toggle('d-none', isEmpty);
   const empty = document.getElementById(emptyId);
   if (empty) empty.classList.toggle('d-none', !isEmpty);
 }
 
-function custodiaRenderCharts(data) {
+// Some "at a glance"/analytics widgets are hidden per-role (see dashboard.php's
+// $showUsersWidget/$showGroupsWidgets/etc.), so their DOM elements may not
+// exist for every viewer — every render function below must go through these
+// instead of calling document.getElementById(...).textContent/.innerHTML
+// directly, or the first missing element throws and silently kills every
+// remaining widget update in that render pass.
+function custodiaSetText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+function custodiaSetHtml(id, html) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = html;
+}
+
+function custodiaEscapeHtmlDash(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/** Populates the four "at a glance" cards — plain HTML bars/lists, not canvas charts, same visual language as the M365 admin dashboard's license/usage cards. */
+function custodiaRenderGlanceCards(data) {
+  const totalUsers = data.activeUsersByRole.reduce((sum, r) => sum + r.count, 0);
+  custodiaSetText('glanceUserCount', totalUsers);
+  const maxRole = Math.max(1, ...data.activeUsersByRole.map(r => r.count));
+  custodiaSetHtml('glanceRoleBars', data.activeUsersByRole.slice(0, 4).map(r => `
+    <div class="m365-bar-row">
+      <div class="m365-bar-row-top"><span>${custodiaEscapeHtmlDash(r.label)}</span><span>${r.count}</span></div>
+      <div class="m365-bar-track"><div class="m365-bar-fill" style="width:${(r.count / maxRole) * 100}%"></div></div>
+    </div>
+  `).join('') || '<div class="text-muted small">No active users.</div>');
+
+  const mattersTotal = data.mattersOpenedSeries.reduce((sum, r) => sum + r.count, 0);
+  custodiaSetText('glanceMattersCount', mattersTotal);
+
+  const totalGroups = data.groupComparison.length;
+  const totalMembers = data.groupComparison.reduce((sum, g) => sum + g.memberCount, 0);
+  const totalActiveMatters = data.groupComparison.reduce((sum, g) => sum + g.activeMatterCount, 0);
+  custodiaSetHtml('glanceGroupKpis', `
+    <div><div class="m365-kpi-value">${totalGroups}</div><div class="m365-kpi-label">Groups</div></div>
+    <div><div class="m365-kpi-value">${totalMembers}</div><div class="m365-kpi-label">Members</div></div>
+    <div><div class="m365-kpi-value">${totalActiveMatters}</div><div class="m365-kpi-label">Active Matters</div></div>
+  `);
+  const topGroups = [...data.groupComparison].sort((a, b) => b.memberCount - a.memberCount).slice(0, 4);
+  const maxMembers = Math.max(1, ...topGroups.map(g => g.memberCount));
+  custodiaSetHtml('glanceGroupBars', topGroups.map(g => `
+    <div class="m365-bar-row">
+      <div class="m365-bar-row-top"><span>${custodiaEscapeHtmlDash(g.name)}</span><span>${g.memberCount}</span></div>
+      <div class="m365-bar-track"><div class="m365-bar-fill" style="width:${(g.memberCount / maxMembers) * 100}%"></div></div>
+    </div>
+  `).join('') || '<div class="text-muted small">No practice groups.</div>');
+
+  const activityTotal = data.auditActivity.reduce((sum, r) => sum + r.count, 0);
+  custodiaSetText('glanceActivityCount', activityTotal);
+  custodiaSetHtml('glanceTrendingUsers', data.topUsers.slice(0, 3).map(u => `
+    <div><div class="m365-trend-name">${custodiaEscapeHtmlDash(u.label)}</div><div class="m365-trend-meta">${u.count} events</div></div>
+  `).join('') || '<div class="text-muted small">No activity yet.</div>');
+}
+
+/**
+ * The 6 charts inside the collapsible #analyticsSection. Kept separate from
+ * custodiaRenderCharts() because Chart.js sizes a canvas from its container
+ * at creation time — destroying/recreating these while the section is
+ * collapsed (display:none) leaves them permanently 0×0 even after
+ * re-expanding. custodiaRenderCharts() below only calls this when the
+ * section is actually visible, and a shown.bs.collapse listener re-renders
+ * with the latest data whenever the user expands it.
+ */
+function custodiaRenderAnalyticsCharts(data) {
   const labels = data.uploadActivity.map(r => custodiaFormatDay(r.day));
 
   custodiaDestroyChart('activity');
@@ -337,9 +600,112 @@ function custodiaRenderCharts(data) {
       },
     });
   }
+
+  const hasTopUsers = data.topUsers.length > 0;
+  custodiaToggleEmpty('topUsersChart', 'topUsersEmpty', !hasTopUsers);
+  custodiaDestroyChart('topUsers');
+  if (hasTopUsers && document.getElementById('topUsersChart')) {
+    const sorted = [...data.topUsers].reverse();
+    custodiaCharts.topUsers = new Chart(document.getElementById('topUsersChart'), {
+      type: 'bar',
+      data: {
+        labels: sorted.map(r => r.label),
+        datasets: [{ data: sorted.map(r => r.count), backgroundColor: '#1e40af', borderRadius: 4, maxBarThickness: 22 }],
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { beginAtZero: true, ticks: { precision: 0 } } },
+      },
+    });
+  }
+
+  const hasGroups = data.groupComparison.length > 0;
+  custodiaToggleEmpty('groupComparisonChart', 'groupComparisonEmpty', !hasGroups);
+  custodiaDestroyChart('groupComparison');
+  if (hasGroups && document.getElementById('groupComparisonChart')) {
+    custodiaCharts.groupComparison = new Chart(document.getElementById('groupComparisonChart'), {
+      type: 'bar',
+      data: {
+        labels: data.groupComparison.map(r => r.name),
+        datasets: [
+          { label: 'Team Members', data: data.groupComparison.map(r => r.memberCount), backgroundColor: '#0d9488', borderRadius: 4, maxBarThickness: 26 },
+          { label: 'Active Matters', data: data.groupComparison.map(r => r.activeMatterCount), backgroundColor: '#1e40af', borderRadius: 4, maxBarThickness: 26 },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true } } },
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+      },
+    });
+  }
+}
+
+function custodiaAnalyticsSectionExpanded() {
+  const section = document.getElementById('analyticsSection');
+  return !section || section.classList.contains('show');
+}
+
+let custodiaLatestAnalytics = CUSTODIA_INITIAL_ANALYTICS;
+
+/** Entry point for both the initial render and the 45s live refresh. The sparkline and "at a glance" cards live outside the collapsible section, so they're always cheap to update; the 6 heavier charts only redraw while #analyticsSection is actually visible — see custodiaRenderAnalyticsCharts()'s comment. */
+function custodiaRenderCharts(data) {
+  custodiaLatestAnalytics = data;
+
+  custodiaDestroyChart('mattersSparkline');
+  custodiaCharts.mattersSparkline = new Chart(document.getElementById('mattersSparkline'), {
+    type: 'line',
+    data: {
+      labels: data.mattersOpenedSeries.map(r => custodiaFormatDay(r.day)),
+      datasets: [{
+        data: data.mattersOpenedSeries.map(r => r.count),
+        borderColor: '#2dd4bf',
+        backgroundColor: 'rgba(45, 212, 191, 0.15)',
+        tension: 0.35,
+        fill: true,
+        pointRadius: 0,
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#64748b', maxTicksLimit: 4, font: { size: 10 } }, grid: { display: false } },
+        y: { display: false },
+      },
+    },
+  });
+
+  custodiaRenderGlanceCards(data);
+
+  if (custodiaAnalyticsSectionExpanded()) {
+    custodiaRenderAnalyticsCharts(data);
+  }
+}
+
+const custodiaAnalyticsSectionEl = document.getElementById('analyticsSection');
+if (custodiaAnalyticsSectionEl) {
+  custodiaAnalyticsSectionEl.addEventListener('shown.bs.collapse', () => custodiaRenderAnalyticsCharts(custodiaLatestAnalytics));
 }
 
 custodiaRenderCharts(CUSTODIA_INITIAL_ANALYTICS);
+
+document.querySelectorAll('.m365-pill').forEach(pill => {
+  pill.addEventListener('click', () => {
+    document.querySelectorAll('.m365-pill').forEach(p => p.classList.remove('active'));
+    pill.classList.add('active');
+    const filter = pill.dataset.filter;
+    document.querySelectorAll('#m365ActionsGrid .m365-action-card').forEach(card => {
+      card.classList.toggle('d-none', filter !== 'all' && card.dataset.category !== filter);
+    });
+  });
+});
 
 // "Live" — quietly re-fetches and redraws on an interval, same JSON shape as
 // the initial embedded payload, so a dashboard left open keeps reflecting

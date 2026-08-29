@@ -276,6 +276,7 @@ require __DIR__ . '/includes/layout_header.php';
   $canRegister = custodia_user_has_permission($pdo, $user, 'register_physical_files');
   $canOverrideCustody = custodia_user_has_permission($pdo, $user, 'override_custody');
   $canClose = custodia_user_has_permission($pdo, $user, 'close_physical_files');
+  $canEditFileProfile = custodia_user_has_permission($pdo, $user, 'edit_physical_files');
 
   $fileFilters = ['status' => $_GET['status'] ?? '', 'lifecycle_status' => $_GET['lifecycleStatus'] ?? ''];
   $fileSearch = trim($_GET['q'] ?? '');
@@ -360,6 +361,9 @@ require __DIR__ . '/includes/layout_header.php';
               </td>
               <td class="text-end">
                 <div class="btn-group btn-group-sm">
+                  <?php if ($canEditFileProfile): ?>
+                    <button class="btn btn-outline-secondary" onclick="openEditFileModal('<?= e($f['id']) ?>', '<?= e($f['jacket_label']) ?>', '<?= e($f['barcode']) ?>', '<?= e($f['current_location_id'] ?? '') ?>', '<?= e($f['status']) ?>')">Edit</button>
+                  <?php endif; ?>
                   <?php if ($f['status'] === 'IN_REGISTRY'): ?>
                     <button class="btn btn-outline-primary" onclick="openCheckoutModal('<?= e($f['id']) ?>', '<?= e($f['barcode']) ?>')">Issue</button>
                   <?php elseif ($f['status'] === 'CHECKED_OUT' && $f['current_custodian_id'] === $user['id']): ?>
@@ -403,6 +407,46 @@ require __DIR__ . '/includes/layout_header.php';
       window.location.reload();
     } catch (err) { custodiaFlash(err.message, 'danger'); }
   }
+  </script>
+  <?php endif; ?>
+
+  <?php if ($canEditFileProfile): ?>
+  <div class="modal fade" id="editFileModal" tabindex="-1">
+    <div class="modal-dialog"><div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Edit Physical File Profile</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <form id="editFileForm" data-action-url="actions/update_physical_file_profile.php">
+        <input type="hidden" name="fileId" id="editFileId">
+        <div class="modal-body">
+          <div class="form-error alert alert-danger d-none"></div>
+          <div class="mb-3"><label class="form-label">Jacket Label</label><input class="form-control" name="jacketLabel" id="editFileJacketLabel" required></div>
+          <div class="mb-3"><label class="form-label">Physical File Number</label><input class="form-control" name="barcode" id="editFileBarcode" required></div>
+          <div class="mb-3">
+            <label class="form-label">Location</label>
+            <select class="form-select" name="locationId" id="editFileLocationId">
+              <option value="">— None —</option>
+              <?php foreach ($locations as $loc): ?>
+                <option value="<?= e($loc['id']) ?>"><?= e($loc['building']) ?> / <?= e($loc['room']) ?></option>
+              <?php endforeach; ?>
+            </select>
+            <div class="form-text" id="editFileLocationNote"></div>
+          </div>
+        </div>
+        <div class="modal-footer"><button type="submit" class="btn btn-primary w-100">Save Profile</button></div>
+      </form>
+    </div></div>
+  </div>
+  <script>
+  function openEditFileModal(fileId, jacketLabel, barcode, locationId, status) {
+    document.getElementById('editFileId').value = fileId;
+    document.getElementById('editFileJacketLabel').value = jacketLabel;
+    document.getElementById('editFileBarcode').value = barcode;
+    document.getElementById('editFileLocationId').value = locationId;
+    document.getElementById('editFileLocationNote').textContent = status === 'IN_REGISTRY'
+      ? ''
+      : 'This file is not In Registry, so its location field is locked here — leave it as-is, or use a custody movement instead.';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('editFileModal')).show();
+  }
+  custodiaWireActionForm(document.getElementById('editFileForm'), () => window.location.reload());
   </script>
   <?php endif; ?>
 

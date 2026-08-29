@@ -31,6 +31,7 @@ const CUSTODIA_NAV_ICONS = [
     'approvals' => '<circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/>',
     'audit' => '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
     'admin' => '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    'reports' => '<path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"/><path d="M9 13h6M9 17h6M9 9h2"/>',
     'help' => '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.4"/><circle cx="12" cy="16.8" r="0.6" fill="currentColor" stroke="none"/>',
 ];
 
@@ -46,6 +47,7 @@ $navItems = [
 ];
 if (in_array($user['role'], ['SYSTEM_ADMIN', 'RECORDS_MANAGER'], true)) {
     $navItems['admin'] = ['label' => 'Admin', 'href' => 'admin.php'];
+    $navItems['reports'] = ['label' => 'Reports', 'href' => 'reports.php'];
 }
 $navItems['help'] = ['label' => 'User Manual', 'href' => 'help.php'];
 
@@ -147,6 +149,8 @@ try {
                   $notifHref = 'matter.php?id=' . urlencode($n['entity_id']);
               } elseif ($n['entity_type'] === 'DIGITAL_DOCUMENT' && $n['entity_id']) {
                   $notifHref = 'shared_with_me.php';
+              } elseif ($n['entity_type'] === 'SYSTEM_REPORT' && $n['entity_id']) {
+                  $notifHref = 'reports.php?id=' . urlencode($n['entity_id']);
               }
             ?>
             <a href="<?= e($notifHref) ?>" class="dropdown-item py-2 <?= $n['read_at'] ? '' : 'bg-light' ?>" onclick="return custodiaOpenNotification(event, '<?= e($n['id']) ?>', '<?= e($notifHref) ?>')" style="white-space: normal;">

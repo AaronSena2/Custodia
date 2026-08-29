@@ -64,9 +64,17 @@ const CUSTODIA_PERMISSIONS = [
         'label' => 'Deactivate/Reactivate Clients',
         'description' => 'Mark a client inactive or reactivate it. Informational only — an inactive client can still be selected when opening or editing a matter.',
     ],
+    'manage_physical_locations' => [
+        'label' => 'Manage Physical Locations',
+        'description' => 'Add new physical storage locations (building/room/shelf/bin) that physical files can be registered or returned to, from Admin → Locations.',
+    ],
     'register_physical_files' => [
         'label' => 'Register Physical Files',
         'description' => 'Register a new physical file and generate its barcode.',
+    ],
+    'edit_physical_files' => [
+        'label' => 'Edit Physical File Profile',
+        'description' => "Edit an existing physical file's jacket/box label and physical file number. Location may only be changed while the file is In Registry — see includes/custody.php for why it's otherwise tied to custody movements.",
     ],
     'close_physical_files' => [
         'label' => 'Close/Reopen Physical Files',
@@ -110,7 +118,7 @@ const CUSTODIA_PERMISSIONS = [
 const CUSTODIA_DEFAULT_ROLE_PERMISSIONS = [
     'SYSTEM_ADMIN' => [
         'manage_users', 'manage_retention_policies', 'manage_practice_groups', 'create_matters', 'create_clients', 'edit_matters', 'deactivate_matters',
-        'edit_clients', 'deactivate_clients', 'register_physical_files', 'close_physical_files',
+        'edit_clients', 'deactivate_clients', 'manage_physical_locations', 'register_physical_files', 'edit_physical_files', 'close_physical_files',
         'approve_custody_movements', 'auto_approve_checkout', 'override_custody', 'override_document_locks', 'override_document_protection',
         'decide_access_requests', 'export_audit_log', 'verify_audit_chain',
     ],

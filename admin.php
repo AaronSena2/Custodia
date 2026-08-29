@@ -7,6 +7,7 @@ require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/permissions.php';
 require_once __DIR__ . '/includes/roles.php';
 require_once __DIR__ . '/includes/practice_groups.php';
+require_once __DIR__ . '/includes/physical_files.php';
 require_once __DIR__ . '/includes/listing.php';
 
 $user = custodia_require_login();
@@ -17,6 +18,7 @@ $pdo = custodia_db();
 // see includes/permissions.php's docblock for why those two travel together.
 $canManageUsers = custodia_user_has_permission($pdo, $user, 'manage_users');
 $canManagePracticeGroups = custodia_user_has_permission($pdo, $user, 'manage_practice_groups');
+$canManageLocations = custodia_user_has_permission($pdo, $user, 'manage_physical_locations');
 $tab = $_GET['tab'] ?? 'retention';
 if (($tab === 'users' || $tab === 'permissions') && !$canManageUsers) {
     $tab = 'retention'; // the tab links themselves are hidden without the permission; this guards a hand-typed URL too
@@ -24,11 +26,27 @@ if (($tab === 'users' || $tab === 'permissions') && !$canManageUsers) {
 if ($tab === 'practicegroups' && !$canManagePracticeGroups) {
     $tab = 'retention';
 }
+if ($tab === 'locations' && !$canManageLocations) {
+    $tab = 'retention';
+}
 
 $policies = custodia_list_retention_policies($pdo);
 $allRoles = ($tab === 'users' || $tab === 'permissions') ? custodia_list_roles($pdo) : [];
 $permissionMatrix = $tab === 'permissions' ? custodia_list_role_permissions($pdo) : [];
 $practiceGroups = $tab === 'practicegroups' ? custodia_list_practice_groups($pdo) : [];
+
+$allPhysicalLocations = [];
+$locationResult = ['rows' => [], 'total' => 0, 'page' => 1, 'pageSize' => 25, 'totalPages' => 1];
+$locationFilters = ['location_type' => ''];
+$locationSearch = '';
+$locationListParams = [];
+if ($tab === 'locations') {
+    $allPhysicalLocations = custodia_list_physical_locations($pdo);
+    $locationFilters = ['location_type' => $_GET['type'] ?? ''];
+    $locationSearch = trim($_GET['q'] ?? '');
+    $locationListParams = custodia_listing_params(['building', 'room', 'shelf', 'bin', 'location_type', 'file_count'], 'building', 'ASC');
+    $locationResult = custodia_apply_listing($allPhysicalLocations, $locationListParams, $locationFilters, $locationSearch, ['building', 'room', 'shelf', 'bin']);
+}
 // Also used by the New Retention Policy modal (retention tab).
 $practiceGroupsForPicker = custodia_list_practice_groups($pdo);
 
@@ -58,6 +76,9 @@ require __DIR__ . '/includes/layout_header.php';
   <?php endif; ?>
   <?php if ($canManagePracticeGroups): ?>
     <li class="nav-item"><a class="nav-link <?= $tab === 'practicegroups' ? 'active' : '' ?>" href="admin.php?tab=practicegroups">Practice Groups</a></li>
+  <?php endif; ?>
+  <?php if ($canManageLocations): ?>
+    <li class="nav-item"><a class="nav-link <?= $tab === 'locations' ? 'active' : '' ?>" href="admin.php?tab=locations">Locations</a></li>
   <?php endif; ?>
 </ul>
 
@@ -492,6 +513,130 @@ require __DIR__ . '/includes/layout_header.php';
     document.getElementById('editPracticeGroupId').value = pg.id;
     document.getElementById('editPracticeGroupName').value = pg.name;
     bootstrap.Modal.getOrCreateInstance(document.getElementById('editPracticeGroupModal')).show();
+  }
+  </script>
+
+<?php elseif ($tab === 'locations'): ?>
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="page-title" style="font-size: 1.4rem; margin-bottom: 0;">Physical Locations</h1>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createLocationModal">+ New Location</button>
+  </div>
+
+  <?php if (!empty($allPhysicalLocations)): ?>
+  <form method="get" action="admin.php" class="filter-bar">
+    <input type="hidden" name="tab" value="locations">
+    <div class="filter-col filter-col-search">
+      <input class="form-control form-control-sm" name="q" placeholder="Search building, room, shelf, bin…" value="<?= e($locationSearch) ?>">
+    </div>
+    <div class="filter-col">
+      <select class="form-select form-select-sm" name="type" onchange="this.form.submit()">
+        <option value="">All types</option>
+        <?php foreach (CUSTODIA_LOCATION_TYPES as $type): ?>
+          <option value="<?= e($type) ?>" <?= $locationFilters['location_type'] === $type ? 'selected' : '' ?>><?= e(ucwords(strtolower(str_replace('_', ' ', $type)))) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="filter-col" style="flex: 0 0 auto;"><button class="btn btn-sm btn-primary" type="submit">Filter</button></div>
+  </form>
+  <?php endif; ?>
+
+  <div class="card">
+    <?php if (empty($allPhysicalLocations)): ?>
+      <div class="text-center text-muted py-5">No physical locations configured yet.</div>
+    <?php elseif (empty($locationResult['rows'])): ?>
+      <div class="text-center text-muted py-5">No physical locations match these filters.</div>
+    <?php else: ?>
+      <table class="table table-hover mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th><?= custodia_sort_link('Building', 'building', $locationListParams) ?></th>
+            <th><?= custodia_sort_link('Room', 'room', $locationListParams) ?></th>
+            <th><?= custodia_sort_link('Shelf', 'shelf', $locationListParams) ?></th>
+            <th><?= custodia_sort_link('Bin', 'bin', $locationListParams) ?></th>
+            <th><?= custodia_sort_link('Type', 'location_type', $locationListParams) ?></th>
+            <th><?= custodia_sort_link('Files Here', 'file_count', $locationListParams) ?></th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($locationResult['rows'] as $loc): ?>
+            <tr>
+              <td class="fw-semibold"><?= e($loc['building']) ?></td>
+              <td><?= e($loc['room']) ?></td>
+              <td class="text-muted"><?= e($loc['shelf'] ?? '') ?: '—' ?></td>
+              <td class="text-muted"><?= e($loc['bin'] ?? '') ?: '—' ?></td>
+              <td><span class="badge text-bg-light border"><?= e(ucwords(strtolower(str_replace('_', ' ', $loc['location_type'])))) ?></span></td>
+              <td class="text-muted"><?= (int) $loc['file_count'] ?></td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-secondary" onclick='openEditLocationModal(<?= json_encode([
+                    "id" => $loc["id"], "building" => $loc["building"], "room" => $loc["room"],
+                    "shelf" => $loc["shelf"], "bin" => $loc["bin"], "locationType" => $loc["location_type"],
+                ], JSON_HEX_APOS | JSON_HEX_QUOT) ?>)'>Edit</button>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif; ?>
+  </div>
+  <?php if (!empty($locationResult['rows'])): ?><?= custodia_pagination_bar($locationResult) ?><?php endif; ?>
+
+  <div class="modal fade" id="createLocationModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title">New Physical Location</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <form id="createLocationForm" data-action-url="actions/create_physical_location.php">
+      <div class="modal-body">
+        <div class="form-error alert alert-danger d-none"></div>
+        <div class="mb-3"><label class="form-label">Building</label><input class="form-control" name="building" required placeholder="Main Registry"></div>
+        <div class="mb-3"><label class="form-label">Room</label><input class="form-control" name="room" required></div>
+        <div class="mb-3"><label class="form-label">Shelf</label><input class="form-control" name="shelf" required></div>
+        <div class="mb-3"><label class="form-label">Bin <span class="text-muted small">(optional)</span></label><input class="form-control" name="bin"></div>
+        <div class="mb-3"><label class="form-label">Type</label>
+          <select class="form-select" name="locationType" required>
+            <?php foreach (CUSTODIA_LOCATION_TYPES as $type): ?>
+              <option value="<?= e($type) ?>"><?= e(ucwords(strtolower(str_replace('_', ' ', $type)))) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer"><button type="submit" class="btn btn-primary w-100">Create Location</button></div>
+    </form>
+  </div></div></div>
+
+  <div class="modal fade" id="editLocationModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title">Edit Physical Location</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <form id="editLocationForm" data-action-url="actions/update_physical_location.php">
+      <input type="hidden" name="locationId" id="editLocationId">
+      <div class="modal-body">
+        <div class="form-error alert alert-danger d-none"></div>
+        <div class="mb-3"><label class="form-label">Building</label><input class="form-control" name="building" id="editLocationBuilding" required></div>
+        <div class="mb-3"><label class="form-label">Room</label><input class="form-control" name="room" id="editLocationRoom" required></div>
+        <div class="mb-3"><label class="form-label">Shelf</label><input class="form-control" name="shelf" id="editLocationShelf" required></div>
+        <div class="mb-3"><label class="form-label">Bin <span class="text-muted small">(optional)</span></label><input class="form-control" name="bin" id="editLocationBin"></div>
+        <div class="mb-3"><label class="form-label">Type</label>
+          <select class="form-select" name="locationType" id="editLocationType" required>
+            <?php foreach (CUSTODIA_LOCATION_TYPES as $type): ?>
+              <option value="<?= e($type) ?>"><?= e(ucwords(strtolower(str_replace('_', ' ', $type)))) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer"><button type="submit" class="btn btn-primary w-100">Save Changes</button></div>
+    </form>
+  </div></div></div>
+
+  <script>
+  custodiaWireActionForm(document.getElementById('createLocationForm'), () => window.location.reload());
+  custodiaWireActionForm(document.getElementById('editLocationForm'), () => window.location.reload());
+
+  function openEditLocationModal(loc) {
+    document.getElementById('editLocationId').value = loc.id;
+    document.getElementById('editLocationBuilding').value = loc.building;
+    document.getElementById('editLocationRoom').value = loc.room;
+    document.getElementById('editLocationShelf').value = loc.shelf;
+    document.getElementById('editLocationBin').value = loc.bin || '';
+    document.getElementById('editLocationType').value = loc.locationType;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('editLocationModal')).show();
   }
   </script>
 
