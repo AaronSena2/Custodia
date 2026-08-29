@@ -23,6 +23,94 @@
   --cus-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
 }
 
+/* ---------------------------------------------------------------------- */
+/* Dark theme — toggled via data-bs-theme="dark" on <html> (assets/js/app.js
+   sets it from localStorage before <body> paints, and on the sidebar toggle
+   click). Redefines the same --cus-* tokens everything above already reads,
+   so cards/tables/buttons/the m365 dashboard/chatbot adapt for free; only
+   the handful of spots below that hardcode a light-only color (badges,
+   pills, the diff view, etc.) need an explicit override. The dark sidebar
+   itself is untouched — it's already dark in the light theme, by design. */
+/* ---------------------------------------------------------------------- */
+
+[data-bs-theme="dark"] {
+  --cus-ink: #e2e8f0;
+  --cus-ink-soft: #cbd5e1;
+  --cus-muted: #94a3b8;
+  --cus-border: #2a3548;
+  --cus-bg: #0b1220;
+  --cus-card: #131c2e;
+  --cus-accent: #2dd4bf;
+  --cus-accent-dark: #14b8a6;
+  --cus-accent-light: #5eead4;
+  --cus-danger: #f87171;
+}
+
+[data-bs-theme="dark"] .stat-tile.stat-tile-alert {
+  border-color: rgba(248, 113, 113, 0.35);
+  background: rgba(248, 113, 113, 0.08);
+}
+
+[data-bs-theme="dark"] .badge.text-bg-success   { background-color: rgba(34, 197, 94, 0.16) !important; color: #4ade80 !important; }
+[data-bs-theme="dark"] .badge.text-bg-warning   { background-color: rgba(245, 158, 11, 0.16) !important; color: #fbbf24 !important; }
+[data-bs-theme="dark"] .badge.text-bg-info      { background-color: rgba(59, 130, 246, 0.16) !important; color: #60a5fa !important; }
+[data-bs-theme="dark"] .badge.text-bg-danger    { background-color: rgba(239, 68, 68, 0.16) !important; color: #f87171 !important; }
+[data-bs-theme="dark"] .badge.text-bg-secondary { background-color: rgba(148, 163, 184, 0.16) !important; color: #cbd5e1 !important; }
+[data-bs-theme="dark"] .badge.text-bg-dark      { background-color: rgba(148, 163, 184, 0.16) !important; color: #cbd5e1 !important; }
+[data-bs-theme="dark"] .badge.text-bg-primary   { background-color: rgba(45, 212, 191, 0.16) !important; color: #5eead4 !important; }
+[data-bs-theme="dark"] .badge.text-bg-purple    { background-color: rgba(168, 85, 247, 0.16) !important; color: #c084fc !important; }
+[data-bs-theme="dark"] .badge.text-bg-teal      { background-color: rgba(45, 212, 191, 0.16) !important; color: #5eead4 !important; }
+[data-bs-theme="dark"] .badge.text-bg-light.border {
+  background-color: rgba(148, 163, 184, 0.12) !important;
+  color: #cbd5e1 !important;
+  border-color: var(--cus-border) !important;
+}
+
+[data-bs-theme="dark"] .action-badge-green  { background: rgba(34, 197, 94, 0.16); color: #4ade80; }
+[data-bs-theme="dark"] .action-badge-blue   { background: rgba(59, 130, 246, 0.16); color: #60a5fa; }
+[data-bs-theme="dark"] .action-badge-teal   { background: rgba(45, 212, 191, 0.16); color: #5eead4; }
+[data-bs-theme="dark"] .action-badge-amber  { background: rgba(245, 158, 11, 0.16); color: #fbbf24; }
+[data-bs-theme="dark"] .action-badge-purple { background: rgba(168, 85, 247, 0.16); color: #c084fc; }
+[data-bs-theme="dark"] .action-badge-red    { background: rgba(239, 68, 68, 0.16); color: #f87171; }
+[data-bs-theme="dark"] .action-badge-gray   { background: rgba(148, 163, 184, 0.16); color: #cbd5e1; }
+
+[data-bs-theme="dark"] .btn-group-sm > .btn-outline-danger:hover  { background-color: rgba(239, 68, 68, 0.16); color: #f87171; }
+[data-bs-theme="dark"] .btn-group-sm > .btn-outline-success:hover { background-color: rgba(34, 197, 94, 0.16); color: #4ade80; }
+
+[data-bs-theme="dark"] .btn-icon-circle.btn-approve { background: rgba(34, 197, 94, 0.16); color: #4ade80; }
+[data-bs-theme="dark"] .btn-icon-circle.btn-approve:hover { background: rgba(34, 197, 94, 0.28); }
+[data-bs-theme="dark"] .btn-icon-circle.btn-reject { background: rgba(239, 68, 68, 0.16); color: #f87171; }
+[data-bs-theme="dark"] .btn-icon-circle.btn-reject:hover { background: rgba(239, 68, 68, 0.28); }
+
+[data-bs-theme="dark"] .pill-tabs .pill-tab { background: rgba(148, 163, 184, 0.12); }
+[data-bs-theme="dark"] .pill-tabs .pill-tab.active { background: var(--cus-accent-dark); color: #041d1a; }
+
+[data-bs-theme="dark"] .progress { background-color: var(--cus-border); }
+
+[data-bs-theme="dark"] .toggle-btn-group .toggle-btn { background: var(--cus-card); }
+[data-bs-theme="dark"] .toggle-btn-group input:checked + .toggle-btn {
+  background: rgba(45, 212, 191, 0.14);
+  color: var(--cus-accent-light);
+}
+
+[data-bs-theme="dark"] .diff-view .diff-equal { color: var(--cus-ink-soft); }
+[data-bs-theme="dark"] .diff-view .diff-del { background-color: rgba(239, 68, 68, 0.16); color: #fca5a5; }
+[data-bs-theme="dark"] .diff-view .diff-ins { background-color: rgba(34, 197, 94, 0.16); color: #86efac; }
+[data-bs-theme="dark"] .diff-del-swatch { background-color: rgba(239, 68, 68, 0.16); }
+[data-bs-theme="dark"] .diff-ins-swatch { background-color: rgba(34, 197, 94, 0.16); }
+
+[data-bs-theme="dark"] .m365-badge-critical      { background: var(--cus-danger); color: #1a0505; }
+[data-bs-theme="dark"] .m365-badge-needs-action  { background: rgba(245, 158, 11, 0.16); border-color: rgba(245, 158, 11, 0.35); color: #fbbf24; }
+[data-bs-theme="dark"] .m365-badge-recommended   { background: rgba(59, 130, 246, 0.16); border-color: rgba(59, 130, 246, 0.35); color: #60a5fa; }
+[data-bs-theme="dark"] .m365-badge-healthy       { background: rgba(34, 197, 94, 0.16); border-color: rgba(34, 197, 94, 0.35); color: #4ade80; }
+
+/* Unread-notification highlight in the sidebar bell dropdown — a custom
+   class instead of Bootstrap's .bg-light utility, which stays a fixed light
+   gray under data-bs-theme="dark" (it isn't one of the theme-aware "subtle"
+   utilities), so it would leave a jarring light patch in dark mode. */
+.dropdown-item.bg-light-unread { background-color: #f8fafc; }
+[data-bs-theme="dark"] .dropdown-item.bg-light-unread { background-color: rgba(45, 212, 191, 0.08) !important; }
+
 * { box-sizing: border-box; }
 
 body {
@@ -59,6 +147,43 @@ a:hover { color: var(--cus-accent); }
   top: 0;
   height: 100vh;
   overflow-y: auto;
+  z-index: 2; /* keeps the sidebar (and its notification dropdown) above .app-content's tables/cards — see the dropdown-menu z-index below */
+}
+
+/* The notification bell dropdown lives inside .app-sidebar, which is both
+   position: sticky and overflow-y: auto — a classic setup for a nested
+   dropdown to render clipped or stacked under later page content. The
+   toggle's data-bs-strategy="fixed" (includes/layout_header.php) makes
+   Popper position the menu with `position: fixed`, escaping the sidebar's
+   overflow/stacking context entirely; this z-index is belt-and-suspenders
+   so it always paints above tables/cards even if that ever changes. */
+.app-sidebar .dropdown-menu {
+  z-index: 1045;
+  /* Bootstrap's own dark-mode dropdown styling is a generic gray
+     (--bs-dropdown-bg etc.), which doesn't match this app's navy --cus-card
+     dark palette used everywhere else (cards, modals, the m365 dashboard) —
+     so it needs the same --cus-* tokens explicitly, in both themes. */
+  background-color: var(--cus-card);
+  color: var(--cus-ink);
+  border: 1px solid var(--cus-border);
+  border-radius: 10px;
+}
+.app-sidebar .dropdown-menu .dropdown-item {
+  color: var(--cus-ink-soft);
+}
+.app-sidebar .dropdown-menu .dropdown-item:hover,
+.app-sidebar .dropdown-menu .dropdown-item:focus {
+  background-color: var(--cus-bg);
+  color: var(--cus-ink);
+}
+.app-sidebar .dropdown-menu .dropdown-divider {
+  border-top-color: var(--cus-border);
+}
+.app-sidebar .dropdown-menu .btn-link {
+  color: var(--cus-accent-dark);
+}
+.app-sidebar .dropdown-menu .btn-link:hover {
+  color: var(--cus-accent);
 }
 
 .app-sidebar .sidebar-brand {
@@ -198,6 +323,18 @@ a:hover { color: var(--cus-accent); }
   color: #64748b;
   font-size: 0.72rem;
 }
+
+.theme-toggle-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  display: inline-flex;
+  cursor: pointer;
+}
+.theme-toggle-btn:hover { color: #e2e8f0; }
+.theme-icon-sun { display: none; }
+[data-bs-theme="dark"] .theme-icon-sun { display: block; }
+[data-bs-theme="dark"] .theme-icon-moon { display: none; }
 
 .app-content {
   flex: 1;

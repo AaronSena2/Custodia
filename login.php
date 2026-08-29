@@ -43,7 +43,7 @@ custodia_start_session();
       <svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="26" height="26"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 4v16"/></svg>
     </div>
     <h1 class="h3 fw-bold mb-1">Custodia</h1>
-    <p class="text-muted">Legal File Registry &amp; Movement Tracking</p>
+    <p class="text-muted">File Registry &amp; Movement Tracking for Every Business</p>
   </div>
   <div class="card shadow-sm">
     <div class="card-body p-4">

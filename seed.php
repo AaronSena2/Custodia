@@ -152,7 +152,7 @@ $northgate = seed_ensure_matter($pdo, [
     'matter_number' => 'M-2024-0187', 'client_name' => 'Northgate Logistics, Inc.', 'practice_area' => 'Corporate',
     'managing_partner_id' => $daniel['id'], 'status' => 'ACTIVE', 'confidentiality' => 'RESTRICTED', 'open_date' => '2024-03-14',
     'team' => [
-        ['userId' => $daniel['id'], 'roleOnMatter' => 'Managing Partner'],
+        ['userId' => $daniel['id'], 'roleOnMatter' => 'Incharge'],
         ['userId' => $elena['id'], 'roleOnMatter' => 'Associate'],
         ['userId' => $marcus['id'], 'roleOnMatter' => 'Paralegal'],
     ],
@@ -161,13 +161,13 @@ $northgate = seed_ensure_matter($pdo, [
 $bellweather = seed_ensure_matter($pdo, [
     'matter_number' => 'M-2024-0142', 'client_name' => 'Bellweather Foods', 'practice_area' => 'Litigation',
     'managing_partner_id' => $priya['id'], 'status' => 'ACTIVE', 'confidentiality' => 'STANDARD', 'open_date' => '2024-01-22',
-    'team' => [['userId' => $priya['id'], 'roleOnMatter' => 'Managing Partner']],
+    'team' => [['userId' => $priya['id'], 'roleOnMatter' => 'Incharge']],
 ]);
 
 seed_ensure_matter($pdo, [
     'matter_number' => 'M-2024-0201', 'client_name' => 'Arden Biotech', 'practice_area' => 'Corporate',
     'managing_partner_id' => $daniel['id'], 'status' => 'ACTIVE', 'confidentiality' => 'PRIVILEGED', 'open_date' => '2024-05-02',
-    'team' => [['userId' => $daniel['id'], 'roleOnMatter' => 'Managing Partner']],
+    'team' => [['userId' => $daniel['id'], 'roleOnMatter' => 'Incharge']],
 ]);
 
 seed_ensure_matter($pdo, [

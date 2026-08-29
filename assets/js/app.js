@@ -4,6 +4,29 @@
  * the "simpler stack" goal of this rebuild.
  */
 
+/**
+ * Applies the saved theme (if any) immediately, before <body> renders — this
+ * file is loaded as a blocking <script> in <head> (see includes/
+ * layout_header.php's comment on why), so this runs before first paint and
+ * there's no flash of the wrong theme. Bootstrap 5.3's own data-bs-theme
+ * attribute drives it; assets/css/app.css's [data-bs-theme="dark"] block
+ * redefines the --cus-* tokens the rest of the app's CSS already reads.
+ */
+(function () {
+  try {
+    if (localStorage.getItem('custodia-theme') === 'dark') {
+      document.documentElement.setAttribute('data-bs-theme', 'dark');
+    }
+  } catch (e) {} // localStorage unavailable (private mode, etc.) — just stay on the light default
+})();
+
+function custodiaToggleTheme() {
+  const html = document.documentElement;
+  const next = html.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-bs-theme', next);
+  try { localStorage.setItem('custodia-theme', next); } catch (e) {}
+}
+
 function custodiaCsrfToken() {
   const meta = document.querySelector('meta[name="csrf-token"]');
   return meta ? meta.getAttribute('content') : '';

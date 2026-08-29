@@ -8,6 +8,7 @@ require_once __DIR__ . '/includes/permissions.php';
 require_once __DIR__ . '/includes/roles.php';
 require_once __DIR__ . '/includes/practice_groups.php';
 require_once __DIR__ . '/includes/physical_files.php';
+require_once __DIR__ . '/includes/audit_query.php';
 require_once __DIR__ . '/includes/listing.php';
 
 $user = custodia_require_login();
@@ -19,6 +20,7 @@ $pdo = custodia_db();
 $canManageUsers = custodia_user_has_permission($pdo, $user, 'manage_users');
 $canManagePracticeGroups = custodia_user_has_permission($pdo, $user, 'manage_practice_groups');
 $canManageLocations = custodia_user_has_permission($pdo, $user, 'manage_physical_locations');
+$canViewAudit = custodia_user_has_permission($pdo, $user, 'view_audit_log');
 $tab = $_GET['tab'] ?? 'retention';
 if (($tab === 'users' || $tab === 'permissions') && !$canManageUsers) {
     $tab = 'retention'; // the tab links themselves are hidden without the permission; this guards a hand-typed URL too
@@ -27,6 +29,9 @@ if ($tab === 'practicegroups' && !$canManagePracticeGroups) {
     $tab = 'retention';
 }
 if ($tab === 'locations' && !$canManageLocations) {
+    $tab = 'retention';
+}
+if ($tab === 'audit' && !$canViewAudit) {
     $tab = 'retention';
 }
 
@@ -47,6 +52,34 @@ if ($tab === 'locations') {
     $locationListParams = custodia_listing_params(['building', 'room', 'shelf', 'bin', 'location_type', 'file_count'], 'building', 'ASC');
     $locationResult = custodia_apply_listing($allPhysicalLocations, $locationListParams, $locationFilters, $locationSearch, ['building', 'room', 'shelf', 'bin']);
 }
+
+$auditQuery = ['actorId' => null, 'entityType' => null, 'actionType' => null, 'q' => null, 'from' => null, 'to' => null];
+$auditResult = ['entries' => [], 'total' => 0, 'page' => 1, 'pageSize' => 25, 'totalPages' => 1];
+$auditExportQuery = '';
+$canExportAudit = false;
+$canVerifyAudit = false;
+$auditUsers = [];
+$auditActionTypes = [];
+if ($tab === 'audit') {
+    $auditQuery = [
+        'actorId' => trim($_GET['actorId'] ?? '') ?: null,
+        'entityType' => trim($_GET['entityType'] ?? '') ?: null,
+        'actionType' => trim($_GET['actionType'] ?? '') ?: null,
+        'q' => trim($_GET['q'] ?? '') ?: null,
+        'from' => trim($_GET['from'] ?? '') ?: null,
+        'to' => trim($_GET['to'] ?? '') ?: null,
+    ];
+    $auditListParams = custodia_listing_params([], 'created_at', 'DESC');
+    $auditResult = custodia_audit_list($pdo, $user, $auditQuery, $auditListParams['page'], $auditListParams['pageSize']);
+    $auditResult['totalPages'] = max(1, (int) ceil($auditResult['total'] / $auditResult['pageSize']));
+    $auditExportQuery = http_build_query(array_filter($auditQuery));
+    $canExportAudit = custodia_user_has_permission($pdo, $user, 'export_audit_log');
+    $canVerifyAudit = custodia_user_has_permission($pdo, $user, 'verify_audit_chain');
+    $auditUsers = $pdo->query('SELECT id, full_name FROM users WHERE is_active = 1 ORDER BY full_name')->fetchAll();
+    $auditActionTypes = array_keys(CUSTODIA_ACTION_BADGE_COLORS);
+    sort($auditActionTypes);
+}
+
 // Also used by the New Retention Policy modal (retention tab).
 $practiceGroupsForPicker = custodia_list_practice_groups($pdo);
 
@@ -79,6 +112,9 @@ require __DIR__ . '/includes/layout_header.php';
   <?php endif; ?>
   <?php if ($canManageLocations): ?>
     <li class="nav-item"><a class="nav-link <?= $tab === 'locations' ? 'active' : '' ?>" href="admin.php?tab=locations">Locations</a></li>
+  <?php endif; ?>
+  <?php if ($canViewAudit): ?>
+    <li class="nav-item"><a class="nav-link <?= $tab === 'audit' ? 'active' : '' ?>" href="admin.php?tab=audit">Audit Log</a></li>
   <?php endif; ?>
 </ul>
 
@@ -637,6 +673,109 @@ require __DIR__ . '/includes/layout_header.php';
     document.getElementById('editLocationBin').value = loc.bin || '';
     document.getElementById('editLocationType').value = loc.locationType;
     bootstrap.Modal.getOrCreateInstance(document.getElementById('editLocationModal')).show();
+  }
+  </script>
+
+<?php elseif ($tab === 'audit'): ?>
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="page-title" style="font-size: 1.4rem; margin-bottom: 0;">Audit Log</h1>
+    <div class="d-flex gap-2">
+      <?php if ($canVerifyAudit): ?>
+        <button class="btn btn-outline-dark btn-sm" id="verifyBtn" onclick="verifyChain()">Verify Chain Integrity</button>
+      <?php endif; ?>
+      <?php if ($canExportAudit): ?>
+        <a class="btn btn-primary btn-sm" href="actions/audit_export.php?<?= e($auditExportQuery) ?>">⬆ Export Report</a>
+      <?php endif; ?>
+    </div>
+  </div>
+  <p class="text-muted small mb-3">Immutable, hash-chained record of every access and movement.</p>
+
+  <div id="verifyResult" class="alert d-none mb-3"></div>
+
+  <form method="get" action="admin.php" class="filter-bar">
+    <input type="hidden" name="tab" value="audit">
+    <div class="filter-col">
+      <select class="form-select form-select-sm" name="actorId" onchange="this.form.submit()">
+        <option value="">All users</option>
+        <?php foreach ($auditUsers as $u): ?>
+          <option value="<?= e($u['id']) ?>" <?= $auditQuery['actorId'] === $u['id'] ? 'selected' : '' ?>><?= e($u['full_name']) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="filter-col">
+      <select class="form-select form-select-sm" name="entityType" onchange="this.form.submit()">
+        <option value="">All entity types</option>
+        <?php foreach (['MATTER', 'PHYSICAL_FILE', 'DIGITAL_DOCUMENT', 'USER', 'AUDIT_LOG'] as $et): ?>
+          <option value="<?= e($et) ?>" <?= $auditQuery['entityType'] === $et ? 'selected' : '' ?>><?= e(ucwords(strtolower(str_replace('_', ' ', $et)))) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="filter-col">
+      <select class="form-select form-select-sm" name="actionType" onchange="this.form.submit()">
+        <option value="">All action types</option>
+        <?php foreach ($auditActionTypes as $at): ?>
+          <option value="<?= e($at) ?>" <?= $auditQuery['actionType'] === $at ? 'selected' : '' ?>><?= e($at) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="filter-col">
+      <input class="form-control form-control-sm" type="date" name="from" value="<?= e($auditQuery['from'] ?? '') ?>" title="From">
+    </div>
+    <div class="filter-col">
+      <input class="form-control form-control-sm" type="date" name="to" value="<?= e($auditQuery['to'] ?? '') ?>" title="To">
+    </div>
+    <div class="filter-col filter-col-search">
+      <input class="form-control form-control-sm" name="q" placeholder="Search reason, entity, IP…" value="<?= e($auditQuery['q'] ?? '') ?>">
+    </div>
+    <div class="filter-col" style="flex: 0 0 auto;"><button class="btn btn-sm btn-primary" type="submit">Filter</button></div>
+  </form>
+
+  <div class="card">
+    <?php if (empty($auditResult['entries'])): ?>
+      <div class="text-center text-muted py-5">No audit entries match these filters.</div>
+    <?php else: ?>
+      <table class="table table-hover mb-0 align-middle small">
+        <thead><tr><th>Timestamp</th><th>Actor</th><th>Action</th><th>Entity</th><th>Reason</th><th>IP Address</th></tr></thead>
+        <tbody>
+          <?php foreach ($auditResult['entries'] as $a): ?>
+            <tr>
+              <td class="text-muted mono small"><?= custodia_format_datetime($a['created_at']) ?></td>
+              <td><?= e($a['actor_name']) ?> <span class="text-muted">(<?= e(custodia_role_label($pdo, $a['actor_role'])) ?>)</span></td>
+              <td><?= custodia_action_badge($a['action_type']) ?></td>
+              <td class="text-muted"><?= e($a['entity_type']) ?></td>
+              <td class="text-muted"><?= e($a['reason'] ?? '—') ?></td>
+              <td class="text-muted mono small"><?= e($a['ip_address']) ?></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif; ?>
+  </div>
+
+  <?= custodia_pagination_bar($auditResult) ?>
+
+  <script>
+  async function verifyChain() {
+    const btn = document.getElementById('verifyBtn');
+    const box = document.getElementById('verifyResult');
+    btn.disabled = true;
+    btn.textContent = 'Verifying…';
+    try {
+      const data = await custodiaPost('actions/verify_audit.php', {});
+      box.className = 'alert ' + (data.valid ? 'alert-success' : 'alert-danger');
+      box.textContent = data.valid
+        ? `Chain verified — ${data.checked} entries checked, no tampering detected.`
+        : `Chain verification FAILED at entry ${data.brokenAtId} — ${data.checked} entries checked before the break.`;
+      box.classList.remove('d-none');
+    } catch (err) {
+      box.className = 'alert alert-danger';
+      box.textContent = err.message;
+      box.classList.remove('d-none');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Verify Chain Integrity';
+    }
   }
   </script>
 

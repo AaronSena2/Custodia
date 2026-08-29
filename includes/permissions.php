@@ -50,7 +50,7 @@ const CUSTODIA_PERMISSIONS = [
     ],
     'edit_matters' => [
         'label' => 'Edit Matter Details',
-        'description' => 'Edit an existing matter\'s number, client, practice area, managing partner, status, and confidentiality.',
+        'description' => 'Edit an existing matter\'s number, client, practice area, incharge, status, and confidentiality.',
     ],
     'deactivate_matters' => [
         'label' => 'Deactivate/Reactivate Matters',
@@ -82,7 +82,7 @@ const CUSTODIA_PERMISSIONS = [
     ],
     'approve_custody_movements' => [
         'label' => 'Approve Custody Movements',
-        'description' => "Approve or reject pending issues and transfers firm-wide. A matter's own managing partner can always act on requests for that matter regardless of this setting.",
+        'description' => "Approve or reject pending issues and transfers firm-wide. A matter's own incharge can always act on requests for that matter regardless of this setting.",
     ],
     'auto_approve_checkout' => [
         'label' => 'Auto-Approved Issue',
@@ -102,7 +102,11 @@ const CUSTODIA_PERMISSIONS = [
     ],
     'decide_access_requests' => [
         'label' => 'Decide Access Requests',
-        'description' => "Approve or deny requests for access to restricted matters firm-wide. A matter's own managing partner can always decide requests for that matter regardless of this setting.",
+        'description' => "Approve or deny requests for access to restricted matters firm-wide. A matter's own incharge can always decide requests for that matter regardless of this setting.",
+    ],
+    'view_audit_log' => [
+        'label' => 'View Audit Log',
+        'description' => 'View the firm-wide Audit Log page. Off by default for every role but System Administrator — grant it to let a role see the audit trail at all before Export/Verify below mean anything for them.',
     ],
     'export_audit_log' => [
         'label' => 'Export Audit Log',
@@ -120,7 +124,7 @@ const CUSTODIA_DEFAULT_ROLE_PERMISSIONS = [
         'manage_users', 'manage_retention_policies', 'manage_practice_groups', 'create_matters', 'create_clients', 'edit_matters', 'deactivate_matters',
         'edit_clients', 'deactivate_clients', 'manage_physical_locations', 'register_physical_files', 'edit_physical_files', 'close_physical_files',
         'approve_custody_movements', 'auto_approve_checkout', 'override_custody', 'override_document_locks', 'override_document_protection',
-        'decide_access_requests', 'export_audit_log', 'verify_audit_chain',
+        'decide_access_requests', 'view_audit_log', 'export_audit_log', 'verify_audit_chain',
     ],
     'RECORDS_MANAGER' => [
         'manage_retention_policies', 'create_matters', 'create_clients', 'register_physical_files',

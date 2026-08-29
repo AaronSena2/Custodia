@@ -43,7 +43,7 @@ try {
         $existing = custodia_find_own_latest_access_request($pdo, $user['id'], 'MATTER', $matterId);
         if ($existing && $existing['status'] === 'PENDING') {
 ?>
-          <div class="alert alert-info">Your access request is pending review by the managing partner or Records Manager.</div>
+          <div class="alert alert-info">Your access request is pending review by the incharge or Records Manager.</div>
 <?php
         } else {
 ?>
@@ -125,7 +125,7 @@ require __DIR__ . '/includes/layout_header.php';
   <?php if ($matter['managing_partner']): ?>
     <div class="d-flex align-items-center gap-2">
       <div class="text-end">
-        <div class="small text-muted">Managing Partner</div>
+        <div class="small text-muted">Incharge</div>
         <div class="fw-semibold"><?= e($matter['managing_partner']['full_name']) ?></div>
       </div>
       <div class="avatar-circle" style="background: var(--cus-sidebar-bg);"><?= e(custodia_initials($matter['managing_partner']['full_name'])) ?></div>
@@ -220,7 +220,7 @@ require __DIR__ . '/includes/layout_header.php';
             <?php endif; ?>
           </select>
         </div>
-        <div class="mb-3"><label class="form-label">Managing Partner</label>
+        <div class="mb-3"><label class="form-label">Incharge</label>
           <select class="form-select" name="managingPartnerId" required>
             <?php foreach ($allUsers as $u): ?>
               <option value="<?= e($u['id']) ?>" <?= $u['id'] === $matter['managing_partner_id'] ? 'selected' : '' ?>><?= e($u['full_name']) ?> (<?= e(custodia_role_label($pdo, $u['role'])) ?>)</option>

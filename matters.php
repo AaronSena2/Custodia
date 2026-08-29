@@ -160,7 +160,7 @@ require __DIR__ . '/includes/layout_header.php';
             </select>
           </div>
           <div class="mb-3">
-            <label class="form-label">Managing Partner</label>
+            <label class="form-label">Incharge</label>
             <select class="form-select" name="managingPartnerId" required>
               <?php foreach ($partners as $p): ?>
                 <option value="<?= e($p['id']) ?>" <?= $p['id'] === $user['id'] ? 'selected' : '' ?>><?= e($p['full_name']) ?></option>

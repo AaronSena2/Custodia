@@ -53,13 +53,13 @@ function custodia_chatbot_knowledge_base(): array
         ['id' => 'matters_request_access', 'section' => 'secMatters', 'sectionLabel' => 'Matters & Access Control',
          'question' => 'How do I request access to a matter?',
          'keywords' => ['request access', 'need access', 'access request', "can't view matter"],
-         'answer' => 'Use "Request Access" on the matter, where available. A firm-wide role or that matter\'s managing partner will see it on their Approvals page.',
+         'answer' => 'Use "Request Access" on the matter, where available. A firm-wide role or that matter\'s incharge will see it on their Approvals page.',
          'permission' => null, 'chipRank' => 40],
 
         ['id' => 'matters_create', 'section' => 'secMatters', 'sectionLabel' => 'Matters & Access Control',
          'question' => 'How do I create a new matter?',
          'keywords' => ['create matter', 'new matter', 'open matter', 'add matter'],
-         'answer' => 'Needs the Create Matters permission. Pick an existing Client and Practice Area from dropdowns — a Partner must name themselves as managing partner.',
+         'answer' => 'Needs the Create Matters permission. Pick an existing Client and Practice Area from dropdowns — a Partner must name themselves as incharge.',
          'permission' => 'create_matters', 'chipRank' => 15],
 
         ['id' => 'matters_edit_deactivate', 'section' => 'secMatters', 'sectionLabel' => 'Matters & Access Control',
@@ -71,7 +71,7 @@ function custodia_chatbot_knowledge_base(): array
         ['id' => 'matters_team_tab', 'section' => 'secMatters', 'sectionLabel' => 'Matters & Access Control',
          'question' => "How do I add someone to a matter's team?",
          'keywords' => ['team & access', 'add team member', 'ethical wall setup', "matter's team"],
-         'answer' => "A matter's Team & Access tab lists who's assigned and configures ethical walls — needs a firm-wide role, or (for team membership) being that matter's managing partner.",
+         'answer' => "A matter's Team & Access tab lists who's assigned and configures ethical walls — needs a firm-wide role, or (for team membership) being that matter's incharge.",
          'permission' => null, 'chipRank' => 70],
 
         ['id' => 'generic_confidentiality_tier', 'section' => 'secMatters', 'sectionLabel' => 'Matters & Access Control',
@@ -171,14 +171,14 @@ function custodia_chatbot_knowledge_base(): array
         ['id' => 'approvals_who_decides', 'section' => 'secApprovals', 'sectionLabel' => 'Approvals',
          'question' => 'Who approves a custody transfer or access request?',
          'keywords' => ['who approves', 'who decides access'],
-         'answer' => "A transfer is decided only by the current custodian. An access request is decided by anyone with Decide Access Requests, or that matter's managing partner.",
+         'answer' => "A transfer is decided only by the current custodian. An access request is decided by anyone with Decide Access Requests, or that matter's incharge.",
          'permission' => null, 'chipRank' => 72],
 
         // --- Audit Log ---
         ['id' => 'audit_visibility', 'section' => 'secAudit', 'sectionLabel' => 'Audit Log',
          'question' => 'Who can see what on the Audit Log?',
          'keywords' => ['who can see the audit log', 'audit visibility by role', 'see my own actions only'],
-         'answer' => 'Guest/Auditor sees nothing, Associate/Paralegal see only their own actions, a Partner sees activity on matters they manage, and firm-wide roles see everything.',
+         'answer' => 'The Audit Log page itself needs the View Audit Log permission — off by default for everyone but System Administrator. For whoever has it: Associate/Paralegal see only their own actions, a Partner sees activity on matters they manage, and firm-wide roles see everything.',
          'permission' => null, 'chipRank' => 62],
 
         ['id' => 'audit_export_verify', 'section' => 'secAudit', 'sectionLabel' => 'Audit Log',

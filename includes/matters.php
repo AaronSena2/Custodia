@@ -180,7 +180,7 @@ function custodia_create_matter(PDO $pdo, array $user, array $dto, string $ipAdd
             'id' => $id, 'num' => $dto['matterNumber'], 'client' => $dto['clientId'], 'area' => $dto['practiceArea'],
             'mp' => $dto['managingPartnerId'], 'conf' => $dto['confidentiality'] ?? 'STANDARD',
         ]);
-        $pdo->prepare('INSERT INTO matter_team_members (id, matter_id, user_id, role_on_matter) VALUES (:id, :mid, :uid, "Managing Partner")')
+        $pdo->prepare('INSERT INTO matter_team_members (id, matter_id, user_id, role_on_matter) VALUES (:id, :mid, :uid, "Incharge")')
             ->execute(['id' => custodia_uuid(), 'mid' => $id, 'uid' => $dto['managingPartnerId']]);
 
         custodia_audit_record($pdo, [
@@ -233,7 +233,7 @@ function custodia_update_matter(PDO $pdo, array $user, string $matterId, array $
     $mpStmt = $pdo->prepare("SELECT id FROM users WHERE id = :id AND is_active = 1");
     $mpStmt->execute(['id' => $managingPartnerId]);
     if (!$mpStmt->fetch()) {
-        throw custodia_bad_request('Managing partner must be an active user.');
+        throw custodia_bad_request('Incharge must be an active user.');
     }
 
     $dupe = $pdo->prepare('SELECT id FROM matters WHERE matter_number = :num AND id != :id');
@@ -331,7 +331,7 @@ function custodia_add_team_member(PDO $pdo, array $user, string $matterId, strin
     $matter = custodia_assert_matter_access($pdo, $user, $matterId);
     $canManageTeam = in_array($user['role'], custodia_firm_wide_roles(), true) || $matter['managing_partner_id'] === $user['id'];
     if (!$canManageTeam) {
-        throw custodia_forbidden('Only the managing partner, Records Manager, or Admin may edit the matter team.');
+        throw custodia_forbidden('Only the incharge, Records Manager, or Admin may edit the matter team.');
     }
 
     $pdo->beginTransaction();

@@ -83,7 +83,7 @@ try {
          VALUES (:id, :num, :client, "General", :mp, "STANDARD", COALESCE(:open_date, CURRENT_TIMESTAMP(6)))'
     );
     $insertTeamMember = $pdo->prepare(
-        'INSERT INTO matter_team_members (id, matter_id, user_id, role_on_matter) VALUES (:id, :mid, :uid, "Managing Partner")'
+        'INSERT INTO matter_team_members (id, matter_id, user_id, role_on_matter) VALUES (:id, :mid, :uid, "Incharge")'
     );
     $insertFile = $pdo->prepare(
         'INSERT INTO physical_files (id, matter_id, barcode, jacket_label, current_location_id, status, lifecycle_status)

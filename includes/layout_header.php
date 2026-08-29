@@ -11,11 +11,13 @@
  *
  * $user and $pageTitle must be set before including this file. $activeNav
  * (optional) highlights the matching nav link — one of: dashboard, matters,
- * scan, documents, approvals, audit, admin, help.
+ * scan, documents, approvals, admin, help. Audit Log is a tab within Admin
+ * (admin.php?tab=audit), not its own nav item — use 'admin' there too.
  */
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/permissions.php';
 
 $activeNav = $activeNav ?? '';
 
@@ -43,9 +45,11 @@ $navItems = [
     'documents' => ['label' => 'Digital Documents', 'href' => 'documents.php'],
     'shared_with_me' => ['label' => 'Shared With Me', 'href' => 'shared_with_me.php'],
     'approvals' => ['label' => 'Approvals', 'href' => 'approvals.php'],
-    'audit' => ['label' => 'Audit Log', 'href' => 'audit.php'],
 ];
 if (in_array($user['role'], ['SYSTEM_ADMIN', 'RECORDS_MANAGER'], true)) {
+    // Audit Log now lives as a tab within Admin (admin.php?tab=audit — see
+    // includes/permissions.php's view_audit_log entry) rather than its own
+    // top-level nav item, matching Practice Groups/Locations/Permissions.
     $navItems['admin'] = ['label' => 'Admin', 'href' => 'admin.php'];
     $navItems['reports'] = ['label' => 'Reports', 'href' => 'reports.php'];
 }
@@ -107,7 +111,7 @@ try {
       </div>
       <div class="sidebar-brand-text">
         <div class="sidebar-brand-title">CUSTODIA</div>
-        <div class="sidebar-brand-subtitle">Legal File Registry</div>
+        <div class="sidebar-brand-subtitle">Business File Registry</div>
       </div>
     </div>
     <ul class="sidebar-nav">
@@ -124,7 +128,7 @@ try {
       <?php endforeach; ?>
     </ul>
     <div class="dropdown px-3 mb-2">
-      <button class="btn btn-sm btn-outline-secondary w-100 d-flex align-items-center justify-content-center gap-2 position-relative" type="button" id="notificationBellToggle" data-bs-toggle="dropdown" aria-expanded="false">
+      <button class="btn btn-sm btn-outline-secondary w-100 d-flex align-items-center justify-content-center gap-2 position-relative" type="button" id="notificationBellToggle" data-bs-toggle="dropdown" data-bs-strategy="fixed" aria-expanded="false">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         Notifications
         <?php if ($sidebarUnreadNotificationCount > 0): ?>
@@ -153,7 +157,7 @@ try {
                   $notifHref = 'reports.php?id=' . urlencode($n['entity_id']);
               }
             ?>
-            <a href="<?= e($notifHref) ?>" class="dropdown-item py-2 <?= $n['read_at'] ? '' : 'bg-light' ?>" onclick="return custodiaOpenNotification(event, '<?= e($n['id']) ?>', '<?= e($notifHref) ?>')" style="white-space: normal;">
+            <a href="<?= e($notifHref) ?>" class="dropdown-item py-2 <?= $n['read_at'] ? '' : 'bg-light-unread' ?>" onclick="return custodiaOpenNotification(event, '<?= e($n['id']) ?>', '<?= e($notifHref) ?>')" style="white-space: normal;">
               <div class="small fw-semibold"><?= e($n['title']) ?><?= $n['read_at'] ? '' : ' <span class="badge text-bg-primary ms-1">new</span>' ?></div>
               <?php if ($n['body']): ?><div class="small text-muted"><?= e($n['body']) ?></div><?php endif; ?>
               <div class="small text-muted"><?= custodia_format_date($n['created_at']) ?></div>
@@ -183,6 +187,10 @@ try {
         <div class="sidebar-user-name"><?= e($user['full_name']) ?></div>
         <div class="sidebar-user-role"><?= e(custodia_role_label($pdo, $user['role'])) ?></div>
       </div>
+      <button type="button" class="sidebar-user-link theme-toggle-btn" onclick="custodiaToggleTheme()" title="Toggle dark mode">
+        <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+        <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      </button>
       <a href="logout.php" class="sidebar-user-link" title="Sign out">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
       </a>

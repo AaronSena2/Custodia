@@ -112,9 +112,9 @@ require __DIR__ . '/includes/layout_header.php';
           <li><strong>Confidentiality tier</strong> — Standard matters are visible to anyone who clears the assignment layer below; Restricted and Privileged matters are invisible to everyone except firm-wide roles, the matter's own team, or someone with an approved access request.</li>
           <li><strong>Assignment</strong> — firm-wide roles (System Admin, Records Manager) see everything; a Partner also sees matters in their own practice area; everyone else needs to be added to the matter's team, or have a request approved.</li>
         </ol>
-        <p>If you can't see a matter you believe you should have access to, use <strong>"Request Access"</strong> on the matter (where available) — an approver (a firm-wide role, or that matter's own managing partner) will see it on their Approvals page.</p>
-        <p>Opening a brand-new matter requires the <strong>Create Matters</strong> permission, and needs a <strong>Client</strong> and <strong>Practice Area</strong> picked from dropdowns rather than typed — both come from their own admin-managed lists (see Clients, below, and Admin → Practice Areas). A Partner creating a matter must name themselves as the managing partner. Editing an existing matter's details afterward is a separate <strong>Edit Matter Details</strong> permission; a one-click <strong>Deactivate/Reactivate Matters</strong> permission lets you close or reopen a matter (sets its Status to Closed/Active) without opening the full edit form.</p>
-        <p>A matter's <strong>Team &amp; Access</strong> tab lists who's assigned and lets you configure ethical walls — both require a firm-wide role or (for team membership) being that matter's managing partner. When adding someone, "Role on Matter" is picked from the same role list as Admin → Permissions (including any custom roles), not typed freely.</p>
+        <p>If you can't see a matter you believe you should have access to, use <strong>"Request Access"</strong> on the matter (where available) — an approver (a firm-wide role, or that matter's own incharge) will see it on their Approvals page.</p>
+        <p>Opening a brand-new matter requires the <strong>Create Matters</strong> permission, and needs a <strong>Client</strong> and <strong>Practice Area</strong> picked from dropdowns rather than typed — both come from their own admin-managed lists (see Clients, below, and Admin → Practice Areas). A Partner creating a matter must name themselves as the incharge. Editing an existing matter's details afterward is a separate <strong>Edit Matter Details</strong> permission; a one-click <strong>Deactivate/Reactivate Matters</strong> permission lets you close or reopen a matter (sets its Status to Closed/Active) without opening the full edit form.</p>
+        <p>A matter's <strong>Team &amp; Access</strong> tab lists who's assigned and lets you configure ethical walls — both require a firm-wide role or (for team membership) being that matter's incharge. When adding someone, "Role on Matter" is picked from the same role list as Admin → Permissions (including any custom roles), not typed freely.</p>
       </div>
     </div>
   </div>
@@ -140,7 +140,7 @@ require __DIR__ . '/includes/layout_header.php';
       <div class="accordion-body">
         <p>Every physical file/box has its own <strong>Physical File Number</strong> (distinct from the matter's own Matter Number — a matter can hold several physical files, e.g. separate volumes). <strong>Scan Station</strong> (<code>scan.php</code>) is the counter for looking one up — scan or type its number, then issue it, return it, or transfer it. The same actions are also available from a matter's Physical Files tab.</p>
         <ul>
-          <li><strong>Issue</strong> — if your role has the <strong>Auto-Approved Issue</strong> permission, it completes immediately; otherwise it goes to <em>Pending Approval</em> until someone with the <strong>Approve Custody Movements</strong> permission (or that matter's managing partner) signs off.</li>
+          <li><strong>Issue</strong> — if your role has the <strong>Auto-Approved Issue</strong> permission, it completes immediately; otherwise it goes to <em>Pending Approval</em> until someone with the <strong>Approve Custody Movements</strong> permission (or that matter's incharge) signs off.</li>
           <li><strong>Return</strong> — the current custodian returns a file themselves at any time.</li>
           <li><strong>Request Transfer</strong> — anyone with matter access who isn't already the custodian can ask for a checked-out file. The file stays with its current custodian, unchanged, until that custodian approves the request from their Approvals page — only they can approve or reject it.</li>
           <li><strong>Override Return</strong> — force-returns a file someone else still has issued to them; needs the <strong>Override Return</strong> permission.</li>
@@ -178,7 +178,7 @@ require __DIR__ . '/includes/layout_header.php';
         <p>Your Approvals page (with a live count badge in the sidebar) has two independent queues:</p>
         <ul>
           <li><strong>Custody Transfers</strong> — transfer requests for files you currently hold custody of (only you can approve or reject these, regardless of role or permissions), plus issue requests waiting on your approval if you hold the <strong>Approve Custody Movements</strong> permission (or manage the matter in question).</li>
-          <li><strong>Confidential Access Requests</strong> — requests to access a Restricted/Privileged matter, decided by anyone with the <strong>Decide Access Requests</strong> permission or that matter's managing partner.</li>
+          <li><strong>Confidential Access Requests</strong> — requests to access a Restricted/Privileged matter, decided by anyone with the <strong>Decide Access Requests</strong> permission or that matter's incharge.</li>
         </ul>
       </div>
     </div>
@@ -190,7 +190,7 @@ require __DIR__ . '/includes/layout_header.php';
     </h2>
     <div id="secAudit" class="accordion-collapse collapse" data-bs-parent="#manualAccordion">
       <div class="accordion-body">
-        <p>Every state-changing action in Custodia — file issues, approvals, uploads, permission changes, everything — writes an append-only, hash-chained audit entry that can't be edited after the fact. What you see on <code>audit.php</code> depends on your role: Guest/Auditor sees nothing, Associate/Paralegal see only their own actions, a Partner sees activity on matters they manage, and firm-wide roles see everything.</p>
+        <p>Every state-changing action in Custodia — file issues, approvals, uploads, permission changes, everything — writes an append-only, hash-chained audit entry that can't be edited after the fact. <code>audit.php</code> itself needs the <strong>View Audit Log</strong> permission — off by default for every role but System Administrator; an admin can grant it to other roles from Admin → Permissions. For whoever does have it, which rows they see still depends on role: Associate/Paralegal see only their own actions, a Partner sees activity on matters they manage, and firm-wide roles see everything.</p>
         <p><strong>Export Report</strong> (needs the <strong>Export Audit Log</strong> permission) downloads the currently filtered view as CSV.</p>
         <p><strong>Verify Chain Integrity</strong> (needs the <strong>Verify Audit Chain</strong> permission) recomputes every entry's hash from the beginning and confirms nothing has been tampered with.</p>
       </div>

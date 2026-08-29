@@ -46,7 +46,11 @@ $checkedOutCount = custodia_count_checked_out_files($pdo, $user);
 $isFirmWide = in_array($user['role'], custodia_firm_wide_roles(), true);
 $showUsersWidget = $isFirmWide || custodia_user_has_permission($pdo, $user, 'manage_users');
 $showGroupsWidgets = $isFirmWide || custodia_user_has_permission($pdo, $user, 'manage_practice_groups');
-$showAuditOversight = $isFirmWide || custodia_user_has_permission($pdo, $user, 'export_audit_log') || custodia_user_has_permission($pdo, $user, 'verify_audit_chain');
+// Deliberately NOT OR'd with $isFirmWide — the audit log (and this widget,
+// which is built from audit log activity) is System Admin-only by default
+// regardless of a role's firm-wide matter visibility; see includes/
+// permissions.php's view_audit_log entry.
+$showAuditOversight = custodia_user_has_permission($pdo, $user, 'view_audit_log');
 $showRequestOversight = $isFirmWide || custodia_user_has_permission($pdo, $user, 'decide_access_requests');
 
 /** Renders a Top Actions status pill — variant is one of critical|needs-action|recommended|healthy. */
@@ -112,6 +116,7 @@ require __DIR__ . '/includes/layout_header.php';
     </div>
     <?php endif; ?>
 
+    <?php if ($showAuditOversight): ?>
     <div class="m365-card">
       <div class="m365-card-label">Activity</div>
       <div class="m365-card-sub">Audit events — last 30 days</div>
@@ -119,9 +124,10 @@ require __DIR__ . '/includes/layout_header.php';
       <div class="m365-card-section-title">Trending users</div>
       <div id="glanceTrendingUsers" class="m365-trend-list"></div>
       <div class="m365-card-actions">
-        <a href="audit.php" class="btn btn-sm m365-btn-outline">View Audit Log</a>
+        <a href="admin.php?tab=audit" class="btn btn-sm m365-btn-outline">View Audit Log</a>
       </div>
     </div>
+    <?php endif; ?>
   </div>
 
   <div class="m365-section-title">
