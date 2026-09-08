@@ -15,8 +15,11 @@
 # Database backups, if ever created inside the project by mistake — these
 # must never live inside the web-servable tree (see includes/db.php's
 # config comments). The real backups live outside this folder entirely.
+# /sql/ is schema-only (CREATE/ALTER TABLE, structural backfills) and is
+# tracked source, not a backup — carved out below.
 /backups/
 *.sql
+!/sql/*.sql
 *.tar.gz
 
 # OS/editor noise.
