@@ -1,0 +1,12 @@
+{
+  "name": "custodia-browser-tests",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Automated browser (E2E) tests for Custodia — a dev/CI-only tool, NOT part of the deployed PHP app. See README.md in this folder before running.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}

@@ -165,7 +165,10 @@ function custodia_find_document(PDO $pdo, array $user, string $id, string $ipAdd
 
     $pdo->beginTransaction();
     try {
-        custodia_audit_record($pdo, ['actorId' => $user['id'], 'actionType' => 'VIEW', 'entityType' => 'DIGITAL_DOCUMENT', 'entityId' => $id, 'ipAddress' => $ipAddress]);
+        custodia_audit_record($pdo, [
+            'actorId' => $user['id'], 'actionType' => 'VIEW', 'entityType' => 'DIGITAL_DOCUMENT', 'entityId' => $id, 'ipAddress' => $ipAddress,
+            'chained' => false, // routine VIEW — see custodia_audit_record()'s 'chained' doc comment (finding 4.3)
+        ]);
         $pdo->commit();
     } catch (Throwable $e) {
         $pdo->rollBack();
@@ -312,8 +315,11 @@ function custodia_upload_document_version(PDO $pdo, array $user, string $documen
     $nextVersionNumber = (int) $doc['current_version_no'] + 1;
 
     // Real (not stubbed) text extraction, run inline — see includes/text_extract.php.
-    // This is separate from the OCR pipeline (still a stub swap point, see README),
-    // which exists for scanned/image-only pages that have no text layer at all.
+    // Image uploads are actually OCR'd here too (Tesseract, if installed) via
+    // the same extraction_status/extracted_text path — see the README's OCR
+    // note. The one remaining gap is scanned/image-only PDF pages, which come
+    // back as NO_TEXT_LAYER (finding 4.4) rather than silently reading as any
+    // other failure.
     $extracted = custodia_extract_text_for_upload(custodia_storage_path($stored['storageKey']), $file['name']);
     $durationSeconds = custodia_extract_media_duration(custodia_storage_path($stored['storageKey']), $file['name']);
 
@@ -400,6 +406,9 @@ function custodia_download_document_version(PDO $pdo, array $user, string $docum
         custodia_audit_record($pdo, [
             'actorId' => $user['id'], 'actionType' => $inline ? 'VIEW' : 'DOWNLOAD', 'entityType' => 'DIGITAL_DOCUMENT', 'entityId' => $documentId,
             'ipAddress' => $ipAddress, 'metadata' => ['versionId' => $version['id'], 'versionNumber' => $version['version_number']],
+            // Only the inline-VIEW case skips the chain (finding 4.3) — an actual
+            // DOWNLOAD of a legal document stays a fully chained, security-relevant event.
+            'chained' => !$inline,
         ]);
         $pdo->commit();
     } catch (Throwable $e) {

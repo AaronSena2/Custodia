@@ -95,6 +95,117 @@ function custodia_create_client(PDO $pdo, array $user, array $fields, string $ip
     }
 }
 
+/**
+ * Creates a client and, in the same transaction, an initial matter for it —
+ * backs the "New Client" modal's optional "Also add a matter" section, so a
+ * brand-new client doesn't have to be created and then re-opened just to
+ * give it its first matter. Pass $matterFields as null to skip the matter
+ * entirely (ordinary client-only creation, identical to
+ * custodia_create_client() otherwise — that function is left as-is for its
+ * other callers, e.g. custodia_bulk_import_clients()).
+ *
+ * @param array{name:string,email?:string,phone?:string,address?:string} $clientFields
+ * @param array{matterNumber:string,practiceArea:string,managingPartnerId:string,confidentiality?:string}|null $matterFields
+ */
+function custodia_create_client_with_matter(PDO $pdo, array $user, array $clientFields, ?array $matterFields, string $ipAddress): array
+{
+    custodia_assert_permission($pdo, $user, 'create_clients');
+
+    $name = trim($clientFields['name'] ?? '');
+    $email = trim($clientFields['email'] ?? '') ?: null;
+    $phone = trim($clientFields['phone'] ?? '') ?: null;
+    $address = trim($clientFields['address'] ?? '') ?: null;
+
+    if ($name === '') {
+        throw custodia_bad_request('Client name is required.');
+    }
+    if ($email !== null && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw custodia_bad_request("That doesn't look like a valid email address.");
+    }
+
+    $dupe = $pdo->prepare('SELECT id FROM clients WHERE name = :name');
+    $dupe->execute(['name' => $name]);
+    if ($dupe->fetch()) {
+        throw custodia_bad_request('A client with that name already exists.');
+    }
+
+    $matterNumber = null;
+    $practiceArea = null;
+    $managingPartnerId = null;
+    $confidentiality = 'STANDARD';
+    if ($matterFields !== null) {
+        // Same permission and validation rules as custodia_create_matter()
+        // in includes/matters.php — duplicated rather than called directly
+        // since that function opens/commits its own transaction and this
+        // needs the client and matter inserts to succeed or fail together.
+        custodia_assert_permission($pdo, $user, 'create_matters');
+
+        $matterNumber = trim($matterFields['matterNumber'] ?? '');
+        $practiceArea = trim($matterFields['practiceArea'] ?? '');
+        $managingPartnerId = trim($matterFields['managingPartnerId'] ?? '');
+        $confidentiality = $matterFields['confidentiality'] ?? 'STANDARD';
+
+        if ($matterNumber === '' || $practiceArea === '' || $managingPartnerId === '') {
+            throw custodia_bad_request('Matter number, practice area, and incharge are all required to add a matter.');
+        }
+        if (!in_array($confidentiality, ['STANDARD', 'RESTRICTED', 'PRIVILEGED'], true)) {
+            throw custodia_bad_request('Invalid confidentiality tier.');
+        }
+        if ($user['role'] === 'PARTNER' && $managingPartnerId !== $user['id']) {
+            throw custodia_forbidden('Partners may only open matters they manage themselves.');
+        }
+
+        $mpStmt = $pdo->prepare('SELECT id FROM users WHERE id = :id AND is_active = 1');
+        $mpStmt->execute(['id' => $managingPartnerId]);
+        if (!$mpStmt->fetch()) {
+            throw custodia_bad_request('Incharge must be an active user.');
+        }
+
+        $matterDupe = $pdo->prepare('SELECT id FROM matters WHERE matter_number = :num');
+        $matterDupe->execute(['num' => $matterNumber]);
+        if ($matterDupe->fetch()) {
+            throw custodia_bad_request('A matter with that matter number already exists.');
+        }
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $clientId = custodia_uuid();
+        $pdo->prepare('INSERT INTO clients (id, name, email, phone, address) VALUES (:id, :name, :email, :phone, :address)')
+            ->execute(['id' => $clientId, 'name' => $name, 'email' => $email, 'phone' => $phone, 'address' => $address]);
+
+        custodia_audit_record($pdo, [
+            'actorId' => $user['id'], 'actionType' => 'CLIENT_CREATED', 'entityType' => 'CLIENT', 'entityId' => $clientId,
+            'ipAddress' => $ipAddress, 'metadata' => ['name' => $name],
+        ]);
+
+        $matterId = null;
+        if ($matterFields !== null) {
+            $matterId = custodia_uuid();
+            $pdo->prepare(
+                'INSERT INTO matters (id, matter_number, client_id, practice_area, managing_partner_id, confidentiality)
+                 VALUES (:id, :num, :client, :area, :mp, :conf)'
+            )->execute([
+                'id' => $matterId, 'num' => $matterNumber, 'client' => $clientId, 'area' => $practiceArea,
+                'mp' => $managingPartnerId, 'conf' => $confidentiality,
+            ]);
+            $pdo->prepare('INSERT INTO matter_team_members (id, matter_id, user_id, role_on_matter) VALUES (:id, :mid, :uid, "Incharge")')
+                ->execute(['id' => custodia_uuid(), 'mid' => $matterId, 'uid' => $managingPartnerId]);
+
+            custodia_audit_record($pdo, [
+                'actorId' => $user['id'], 'actionType' => 'MATTER_CREATED', 'entityType' => 'MATTER', 'entityId' => $matterId,
+                'ipAddress' => $ipAddress,
+            ]);
+        }
+
+        $pdo->commit();
+        return ['id' => $clientId, 'matterId' => $matterId];
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+
 /** @param array{name:string,email?:string,phone?:string,address?:string} $fields */
 function custodia_update_client(PDO $pdo, array $user, string $clientId, array $fields, string $ipAddress): array
 {

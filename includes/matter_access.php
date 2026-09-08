@@ -130,6 +130,12 @@ function custodia_bypass_ethical_wall(PDO $pdo, array $user, string $matterId, s
         'metadata' => ['managingPartnerId' => $matter['managing_partner_id']],
     ]);
 
-    // TODO(notifications): notify matter.managing_partner_id that a bypass occurred.
+    // Notification to matter.managing_partner_id is handled by
+    // jobs/threat_detection_sweep.php (2026-09-06), which alerts on every
+    // ETHICAL_WALL_BYPASS row within its 15-minute sweep window and routes
+    // the alert to the managingPartnerId recorded in metadata above, in
+    // addition to SYSTEM_ADMIN/RECORDS_MANAGER — not done synchronously
+    // here, so there's up to one sweep interval of lag before the partner
+    // is notified.
     return $matter;
 }

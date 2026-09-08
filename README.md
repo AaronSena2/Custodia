@@ -87,6 +87,15 @@ Then visit `http://localhost:8080/login.php`.
 
 Seeded by `seed.php`. Password for every account: **`ChangeMe123!`**
 
+This list used to also be rendered on the public login page itself —
+removed as of the 2026-09-03 security review (finding 1.1, CRITICAL): it
+let anyone who could reach the app, unauthenticated, sign in as the System
+Administrator with no guessing required. It's fine to keep this table here
+in the README for local/dev use, since the README isn't served by the app;
+see `sql/upgrade_020_force_password_reset.sql` and
+`jobs/rotate_all_passwords.php` for rotating this password on an install
+that has real (non-demo) data.
+
 | Email | Role |
 |---|---|
 | sam.okafor@custodia.demo | System Administrator |
@@ -111,7 +120,7 @@ request is approved; Marcus is ethically walled from Bellweather Foods.
 - `document_compare.php` — side-by-side redline comparison between any two versions of a document
 - `approvals.php` — incoming transfer confirmations, custody movements pending approval, and access requests
 - `audit.php` — filterable, paginated audit log explorer with CSV export and hash-chain integrity verification
-- `admin.php` — retention policy configuration (System Admin + Records Manager); User Accounts and Permissions tabs (gated by the `manage_users` permission, System Admin by default) for creating accounts, editing profiles/roles, deactivating/reactivating, resetting passwords, creating new roles, and configuring which role has which capability
+- `admin.php` — retention policy configuration (gated by the `manage_retention_policies` permission, System Admin + Records Manager by default); User Accounts and Permissions tabs (gated by the `manage_users` permission, System Admin by default) for creating accounts, editing profiles/roles, deactivating/reactivating, resetting passwords, creating new roles, and configuring which role has which capability — the page itself is reachable by any role holding at least one admin-area permission, not just the two built-ins (security review 2026-09-03, finding 2.2)
 - `help.php` — in-app user manual, open to every role, with a personalized "what can I do" panel and an admin-only live role reference (see "User Manual" below)
 
 ## Document management (iManage-style)
@@ -123,7 +132,7 @@ Beyond version upload/edit-lock/share-links (the original blueprint's Section 4.
 - **Version comparison / redline** (`document_compare.php`). A dependency-free two-level diff (`includes/text_diff.php`): paragraphs are compared first (keeps the LCS diff table small and fast even for a long contract), then any paragraph-for-paragraph edit gets refined to a word-level diff for a proper redline view — additions in green, removals in red-strikethrough. Only available between versions that both extracted cleanly (an image-only PDF version, for instance, has nothing to diff against).
 - **Download and in-page preview for any file type**, including PDF, images, audio, and video — `actions/download_document.php` serves the stored file (or a specific version via `?versionId=`) under the same RBAC as every other read, with the real MIME type and original filename captured at upload time (`document_versions.mime_type`/`original_filename`), and supports HTTP Range requests so `<audio>`/`<video>` can seek instead of downloading the whole file first. Click "Preview" on a document row for an in-modal viewer (native PDF embed, `<img>`, `<audio>`, or `<video>`); "Download" always saves the file regardless of type. Uploads are validated against `includes/upload_policy.php` before they're accepted — see "Known gaps" for the size limits that also require a php.ini change.
 - **Audio/video duration**, shown next to the Preview/Download buttons and in the preview modal title (e.g. "Deposition Clip — 12:04"). Computed at upload time by `includes/media_metadata.php` — a small dependency-free parser (RIFF chunks for `.wav`, the ISO-BMFF `moov`/`mvhd` box for `.mp4`/`.m4a`/`.mov`, and best-effort MPEG frame-header math with a Xing/VBRI fast path for `.mp3`) rather than a vendored library, matching this project's no-Composer/no-build-step approach elsewhere. `.webm`/`.ogg`/`.avi`/`.mkv` aren't parsed and simply show no duration, rather than a guess.
-- **Real OCR for standalone images** (`.jpg`/`.png`/`.gif`/`.webp`/`.bmp`/`.tif`) via a locally installed Tesseract binary — see "Known gaps" for exactly what's covered and what isn't (scanned PDFs aren't yet).
+- **Real OCR for standalone images** (`.jpg`/`.png`/`.gif`/`.webp`/`.bmp`/`.tif`) via a locally installed Tesseract binary, and — as of 2026-09-06 — **scanned/image-only PDFs too**, via a scheduled sweep (`jobs/ocr_scanned_pdfs.php`) rather than at upload time; see "Known gaps" for exactly how that's split and why.
 
 Existing install upgrading from an earlier copy of this project: run `sql/upgrade_002_document_management.sql`, `sql/upgrade_003_file_metadata.sql`, and `sql/upgrade_004_media_metadata.sql` once each via phpMyAdmin's SQL tab against your `custodia` database — they add the new columns/index and backfill values for documents you already have, without touching your existing data. A brand-new install doesn't need any of them; `sql/schema.sql` already includes everything.
 
@@ -131,9 +140,14 @@ Existing install upgrading from an earlier copy of this project: run `sql/upgrad
 
 Roles are admin-extensible, not fixed — System Admin (the `manage_users` permission) can create new roles from Admin → Permissions ("+ New Role": a key and a label), on top of the six the app ships with (System Admin, Records Manager, Partner, Associate, Paralegal, Guest/Auditor). What each role is *allowed to do* is a separate, admin-editable matrix, also on that screen: a role × capability grid covering 12 flat "may this role do X" gates — managing users, retention policies, creating matters, registering physical files, approving custody movements, auto-approved checkout, overriding a check-in or a document lock, initiating a transfer on someone else's behalf, deciding access requests, exporting the audit log, and verifying the audit chain. Toggle a checkbox and save — every page and every `actions/*.php` endpoint that gates on that capability re-checks the database on the next request, nothing needs restarting. `includes/roles.php` owns the role catalog; `includes/permissions.php` owns the capability matrix.
 
-**What this deliberately does NOT touch**, and why: the deeper three-layer per-matter RBAC in `includes/matter_access.php` (ethical wall → confidentiality tier → team assignment), a matter's managing-partner-specific overrides (a Partner can always approve custody requests or decide access requests on a matter they personally manage, regardless of what the matrix says — that's a fact about the matter's data, not a role privilege), and baseline role-tier rules like "Guest/Auditor can't create documents." Folding those into an admin-editable matrix would be a much bigger, riskier redesign of this app's core security model than a configurable capability list calls for — see `includes/permissions.php`'s and `includes/roles.php`'s docblocks for the full reasoning and `CUSTODIA_PERMISSIONS`/`CUSTODIA_DEFAULT_ROLE_PERMISSIONS`/`CUSTODIA_BUILTIN_ROLES` for the exact catalogs and defaults (the defaults reproduce the app's original hardcoded behavior exactly, so installing either feature changes nothing until an admin edits the matrix or adds a role).
+**What this deliberately does NOT touch**, and why: the deeper three-layer per-matter RBAC in `includes/matter_access.php` (ethical wall → confidentiality tier → team assignment), a matter's managing-partner-specific overrides (whoever is a matter's own Incharge — `matters.managing_partner_id`, settable to any active user regardless of role from Edit Matter Details — can always approve custody requests or decide access requests on that matter, regardless of what the matrix says: that's a fact about the matter's data, not a role privilege), and baseline role-tier rules like "Guest/Auditor can't create documents." Folding those into an admin-editable matrix would be a much bigger, riskier redesign of this app's core security model than a configurable capability list calls for — see `includes/permissions.php`'s and `includes/roles.php`'s docblocks for the full reasoning and `CUSTODIA_PERMISSIONS`/`CUSTODIA_DEFAULT_ROLE_PERMISSIONS`/`CUSTODIA_BUILTIN_ROLES` for the exact catalogs and defaults (the defaults reproduce the app's original hardcoded behavior exactly, so installing either feature changes nothing until an admin edits the matrix or adds a role).
 
 **A newly created role is deliberately narrow.** It gets a key and a label — nothing else — and starts with every permission in the matrix unchecked. It can never become "firm-wide" (see every matter, the way System Admin/Records Manager can) the way a built-in role can; it always sees only matters it's explicitly assigned to, the same tier Associate/Paralegal are in today. Making a role's matter-visibility tier itself configurable was considered and deliberately deferred — it would mean extending `custodia_firm_wide_roles()`-style logic (currently hardcoded to those two roles) across `matters.php`, `audit_query.php`, `physical_files.php`, and `access_requests.php` to be table-driven, a materially bigger change than adding a role key. Renaming a role isn't supported yet.
+
+**Security review 2026-09-03, finding 2.2 — a growing role list (this install has grown well past the original six) surfaced three real gaps between "granted in the matrix" and "actually works," all now fixed:**
+- `admin.php` itself used to gate the whole page on a hardcoded `SYSTEM_ADMIN`/`RECORDS_MANAGER` role check, ahead of every tab's own permission check. That made every admin-area matrix permission (`manage_users`, `manage_retention_policies`, `manage_practice_groups`, `manage_physical_locations`, `view_audit_log`, `export_audit_log`, `verify_audit_chain`) dead weight for any other role — an admin could grant a custom role `manage_retention_policies`, but that role would still 403 on `admin.php` before ever reaching the Retention tab. The page gate is now permission-based (any role holding at least one admin-area permission can reach it); each tab's own check is unchanged. The Retention tab itself — the catch-all default for `?tab=` — picked up an explicit `manage_retention_policies` check it never had before (previously implicit only via the page-level role check just removed).
+- `includes/audit_query.php`'s RBAC scoping used to be `if (ASSOCIATE/PARALEGAL) {narrow} elseif (PARTNER) {managed matters}` with SYSTEM_ADMIN/RECORDS_MANAGER relying on falling through both branches to get unscoped access. Any other role — including a custom role granted `view_audit_log`/`export_audit_log` and meant to see only its own actions, the way Associate/Paralegal do — fell through the same way and silently got full firm-wide audit visibility instead. Firm-wide reach is now an explicit check against `custodia_firm_wide_roles()` (the same safe pattern `matters.php`/`physical_files.php` already used), and anything else defaults to the narrow "own actions only" floor.
+- The managing-partner "always act on your own matter" override in `includes/custody.php` (`custodia_approve_movement()`) and `includes/access_requests.php` (`custodia_can_decide_matter_access()`) used to require `role === 'PARTNER'` literally. Since Edit Matter Details' Incharge dropdown accepts any active user regardless of role, a matter incharge who isn't literally a Partner (a "Senior Associate" or "Principal Associate" managing their own matters, say) had no floor at all — they needed the firm-wide `approve_custody_movements`/`decide_access_requests` permission just to act on matters they personally run, which also handed them approval power over every other matter. Both checks now key off the data fact (`$matter['managing_partner_id'] === $user['id']`) instead of the role label; the existing rule that a literal Partner's firm-wide grant of these two permissions doesn't extend beyond their own matters is unchanged.
 
 **Deleting a role** (the "Delete" link under a role's column header on Admin → Permissions — only shown for non-built-in roles) is possible but guarded on both sides: `custodia_delete_role()` refuses to delete any of the six built-ins outright (they're load-bearing — `matter_access.php`, `custody.php`, and others special-case those exact role strings), and refuses to delete a role that any user currently holds ("N users still assigned to it — reassign them first"), so no user's `role` foreign key is ever left dangling. It's the app's one hard-delete action (deactivating a user, by contrast, is reversible), so the UI backs it with a plain `confirm()` rather than the custom-modal pattern used elsewhere — a deliberate, minimal exception for the one place undo genuinely isn't possible.
 
@@ -162,6 +176,8 @@ Everything else on the page (Getting Started, Matters & Access Control, Physical
 **RBAC-scoped using the app's existing rules, not a parallel set.** Document-derived charts (uploads, file types) are scoped to `custodia_list_matters_for_user()`'s matter set — the same list that drives `matters.php`. Audit-derived charts (activity, action types, most-accessed) reuse `custodia_build_audit_where()` from `includes/audit_query.php` — the exact WHERE clause `audit.php` itself renders with: Guest/Auditor sees nothing, Associate/Paralegal see only their own actions, Partner sees matters they manage, Admin/Records Manager see everything. Verified directly: a System Admin's numbers and a seeded Associate's numbers differ correctly, and an Associate's empty "Most Accessed Documents" panel falls back to a plain "No downloads recorded yet." message instead of an empty chart.
 
 **"Live"** means exactly one thing here, deliberately: `actions/dashboard_analytics.php` re-runs the same queries and returns fresh JSON, and the page polls it every 45 seconds and redraws all four charts (`custodiaRenderCharts()` in `dashboard.php`) — no page reload, no websocket, matching the plain-`fetch()` approach every other action in this app already uses. The initial render uses PHP-computed data embedded directly in the page (`CUSTODIA_INITIAL_ANALYTICS`), so charts appear immediately without waiting on that first poll.
+
+**Server-side cached, per user, for 45 seconds** (`custodia_dashboard_analytics_cached()` in `includes/analytics.php` — security review 2026-09-03, finding 4.1). With the dashboard routinely left open across a shift, both the page-load path and the 45s poll used to recompute all 9 underlying queries from scratch every single time; a review session measured 10+ of those round trips in one sitting. The cache is keyed per user (results are RBAC-scoped, so two viewers can legitimately see different numbers) and stored as plain files under `storage/.cache/` — no APCu/Redis dependency, works unmodified on a bare XAMPP install. A failed cache write (read-only storage, disk hiccup) just falls back to computing fresh, same as before this existed.
 
 ## Structure
 
@@ -249,13 +265,53 @@ meaningfully more thorough verification than the earlier Node/Prisma version
 could get in its sandbox, which was blocked from reaching a real database
 at all.
 
+An automated browser (E2E) test suite now also exists — `tests/browser/`,
+built with Playwright, a dev/CI-only tool kept outside this app's own
+dependency-free design (see "Known gaps" below). It drives the app the
+way a real user's browser would: real login sessions, real CSRF tokens,
+real navigation. See `tests/browser/README.md` for coverage and how to
+run it.
+
 ## Known gaps for a production deployment
 
+- **Deployment topology, backups, log rotation, and process supervision**
+  are covered separately in [`DEPLOYMENT.md`](DEPLOYMENT.md) — written in
+  response to the security review (2026-09-03, finding 4.6), it's a
+  checklist rather than a swap point, since there's no code change that
+  fixes "this runs on an unsupervised Windows workstation with no backups."
 - **Auth** is session + `password_hash()`/`password_verify()` for demo
   purposes. Swap point for real SSO/OIDC: `includes/auth.php`'s
   `custodia_attempt_login()` — replace the password check with a token
   verification call against the firm's IdP (Azure AD / Okta / Keycloak),
   then populate `$_SESSION['user_id']` the same way afterward.
+- **Browser security headers are set on every response** — security review
+  2026-09-03, finding 1.5: no `Content-Security-Policy`, `X-Frame-Options`,
+  `X-Content-Type-Options`, or `Referrer-Policy` header was present on any
+  page before this. `includes/security_headers.php`'s
+  `custodia_send_security_headers()` is called once per request from
+  `custodia_start_session()` (`includes/auth.php`) — the one chokepoint
+  every PHP entry point passes through before any output, so every page,
+  every `actions/*.php` endpoint, and `actions/download_document.php` all
+  get `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: same-origin`, and a CSP scoped to what the app actually
+  loads (`'self'` plus the jsDelivr CDN for Bootstrap/Chart.js). The CSP
+  keeps `'unsafe-inline'` for `script-src`/`style-src` — the app relies
+  extensively on inline `<script>` blocks, `onclick`/`onchange` handlers,
+  and inline `style=""` attributes throughout (vanilla JS, no build step),
+  and moving all of that to a strict nonce/hash-based CSP would mean
+  reworking markup on every page, out of scope for this fix; it still
+  blocks the more realistic risk — a future XSS or a compromised CDN
+  loading/exfiltrating to a domain the app doesn't already trust. The root
+  `.htaccess` covers the same two headers (`X-Content-Type-Options`,
+  `Referrer-Policy`) for static files under `assets/`, which are served
+  directly by Apache and never touch PHP. The same chokepoint also strips
+  `X-Powered-By` (security review 2026-09-03, finding 1.4 — every response
+  handed out the exact PHP version) via `header_remove()`, since
+  `expose_php = Off` is `php.ini`-only and out of the app's own reach; the
+  other half of that finding — Apache's own `Server: Apache/...` header —
+  is `httpd.conf` configuration with no code equivalent, so it's in
+  [`DEPLOYMENT.md`](DEPLOYMENT.md) instead, alongside confirming
+  `expose_php = Off` in `php.ini` as belt-and-suspenders.
 - **File storage** (`includes/storage.php`) writes uploaded document
   versions to local disk. Swap point for S3-compatible storage: replace
   `custodia_storage_save()`/`custodia_storage_path()` — nothing else in the
@@ -280,40 +336,125 @@ at all.
   to a PATH lookup) for `.jpg`/`.png`/`.gif`/`.webp`/`.bmp`/`.tif` uploads, and
   the result feeds `extracted_text`/`extraction_status` the same as DOCX/PDF —
   so an OCR'd image is fully searchable and shows up in `search.php` like any
-  other document. If Tesseract isn't installed, image uploads just fall back
-  to their prior behavior (`extraction_status = 'FAILED'`, no text) rather
-  than erroring. **Scanned/image-only PDFs are still not OCR'd** — that needs
-  rasterizing each page to an image first (Ghostscript or poppler), a bigger
-  dependency than this deployment currently has; a real production setup
-  would add that and move OCR off the request thread onto a job queue for
-  large files. The legacy `ocr_text`/`ocr_status` columns are unrelated to
+  other document. The legacy `ocr_text`/`ocr_status` columns are unrelated to
   this and remain unused (see schema comments).
+- **Scanned/image-only PDFs are OCR'd too, as of 2026-09-06 — but by a
+  scheduled sweep, not inline at upload.** Rasterizing a multi-page scan to
+  images before Tesseract can even look at it is easily tens of seconds to
+  minutes, which has no business blocking an upload HTTP request the way
+  near-instant standalone-image OCR does. So a PDF with no text layer still
+  comes back `NO_TEXT_LAYER` the instant it's uploaded (unchanged), and
+  **`jobs/ocr_scanned_pdfs.php`**, run hourly via Task Scheduler/cron, sweeps
+  every `NO_TEXT_LAYER` version — new uploads and the pre-existing backlog
+  alike — rasterizing each page with **Ghostscript** (`custodia_ghostscript_binary()`,
+  checked first at `C:\Program Files\gs\gs*\bin\gswin64c.exe`, falling back to
+  a PATH lookup) and OCRing each page image with the same Tesseract wrapper
+  standalone images use, up to `CUSTODIA_OCR_PDF_MAX_PAGES` (40) pages per
+  document. A document is flipped to `DONE`/searchable the moment the sweep
+  finds any text; if Ghostscript genuinely finds nothing (or isn't installed
+  yet), the version simply stays `NO_TEXT_LAYER` rather than being guessed at
+  or marked broken. This is the one place in the app that needs a second
+  binary installed beyond Tesseract — see the job's own header comment for
+  the exact `schtasks`/cron registration command.
+- **A scanned PDF or an un-OCR'able image (Tesseract not installed, or OCR
+  genuinely found nothing) is labeled distinctly, not lumped in with other
+  extraction failures.** Security review 2026-09-03, finding 4.4: the
+  Documents list/Matter Documents tab used to show every non-indexed
+  document as the same plain muted "No extractable text", indistinguishable
+  from a corrupt file, an empty file, or an unsupported type — silently
+  reading as "search is broken" rather than "this needs OCR." PDFs and
+  images that parsed successfully but yielded zero text now get their own
+  `NO_TEXT_LAYER` status (`custodia_extract_text_for_upload()` in
+  `includes/text_extract.php`), rendered as a visible amber badge — "Scanned
+  — not searchable (needs OCR)", with a tooltip explaining why and what to
+  do — instead of the same gray text every other status used. Text-native
+  types (txt/md/csv/docx) that come back empty still get plain `FAILED`:
+  for those, empty really does mean broken/empty, not "needs OCR."
 - **The overdue-return sweep and retention-review job** described in the
-  blueprint (a nightly pass flagging overdue files / matters past their
-  retention window) is not wired up as a scheduled job here — `dashboard.php`
-  computes "overdue" live on every page load instead, which is correct but
-  doesn't send proactive alerts. A real deployment would add this as a
-  cron entry calling a small PHP script (`php jobs/overdue_sweep.php`),
-  matching how XAMPP/most PHP hosts already support cron.
-- **No self-service "forgot password" flow or account lockout after repeated
-  failed logins.** A System Administrator can create accounts, edit profiles/
-  roles, and reset any user's password from Admin → User Accounts
-  (`includes/users.php`) — but that's admin-driven (the admin sets the value
-  and shares it with the user directly), not self-service. The last active
-  System Administrator can't be deactivated or demoted, so the account
-  screen can't lock everyone out.
-- No automated browser/UI tests — `tests/smoke.php` covers the business
-  logic layer thoroughly; the pages themselves were verified manually via
-  curl during development (see "Tests" above) rather than with something
-  like Playwright.
+  blueprint (a nightly/hourly pass flagging overdue files and matters past
+  their retention window) now exists as `jobs/overdue_sweep.php` (security
+  review 2026-09-03, finding 4.5) — `dashboard.php` still computes
+  "overdue" live for the page itself (still correct, and needed for the
+  live view), but the scheduled job additionally notifies each overdue
+  file's custodian directly, and — previously true gap — actually
+  generates the `DESTRUCTION_REVIEW` access requests the dashboard's
+  "pending destruction review" tile and the Approvals page already knew
+  how to show but that nothing ever created. Register it with Task
+  Scheduler/cron per the command in the file's own header comment; safe to
+  re-run, since both checks are deduped against already-flagged rows.
+- **Firm-wide default retention policy** (security review 2026-09-03,
+  finding 2.1): on the live S&L Advocates instance, only 2 of 14 real
+  practice groups had a retention policy, so `jobs/overdue_sweep.php`'s
+  exact-match lookup silently never fired for matters in the other 12.
+  Admin → Retention Policies now has a dedicated "Firm-wide default"
+  card, separate from the per-practice-group table, that the sweep job
+  falls back to for any practice group with no policy of its own —
+  including ones added later — and the same screen lists exactly which
+  groups are currently relying on it (or, if no default is set, are
+  completely uncovered). Backed by a sentinel `practice_area` value
+  (`CUSTODIA_RETENTION_DEFAULT_PRACTICE_AREA` in
+  `includes/retention_policies.php`), not a schema change — no upgrade
+  script needed.
+- **Audit hash-chain integrity verification** was click-only (the Audit
+  Explorer's "Verify Chain Integrity" button) with no scheduled equivalent
+  — security review 2026-09-03, finding 4.2. `jobs/verify_audit_chain.php`
+  now runs the same check on a schedule, records the result either way, and
+  notifies every active System Admin/Records Manager only if the chain is
+  actually found broken. Also see finding 4.3 below: routine `VIEW` events
+  are now excluded from the chain entirely (still logged, just not hashed),
+  so both this job and the button itself have materially less to check at
+  current audit-log volume.
+- **No self-service "forgot password" flow.** A System Administrator can
+  create accounts, edit profiles/roles, and reset any user's password from
+  Admin → User Accounts (`includes/users.php`) — but that's admin-driven
+  (the admin sets the value and shares it with the user directly), not
+  self-service. The last active System Administrator can't be deactivated
+  or demoted, so the account screen can't lock everyone out. As of the
+  2026-09-03 security review (finding 1.1), every admin-set password — new
+  account, admin-driven reset, or bulk CSV import — forces the account
+  through `change_password.php` on its next sign-in (`must_reset_password`
+  in `includes/auth.php`'s `custodia_require_login()`) before it can reach
+  any other page, so an admin-known password never stays the account's real
+  password.
+- **Account lockout and idle-session timeout** (security review 2026-09-03,
+  finding 1.6). `custodia_attempt_login()` in `includes/auth.php` locks an
+  account for `security.lockout_minutes` (default 15) after
+  `security.max_failed_logins` (default 5) consecutive failed sign-ins —
+  configurable via `CUSTODIA_MAX_FAILED_LOGINS`/`CUSTODIA_LOCKOUT_MINUTES`
+  env vars (see `includes/config.php`); while locked, the password is never
+  even checked, and login.php shows a distinct "temporarily locked"
+  message. An admin-issued password reset (Admin → User Accounts) also
+  lifts a lock immediately, without waiting out the timer. Separately,
+  `custodia_current_user()` treats any session with no recorded activity
+  for longer than `security.idle_timeout_minutes` (default 20,
+  `CUSTODIA_IDLE_TIMEOUT_MINUTES`) as signed out — the next request bounces
+  to `login.php` with a "signed out after a period of inactivity" notice.
+  This is a hard sign-out, not a lighter lock-screen-that-keeps-your-place;
+  MFA is still not implemented (the original blueprint's stated posture for
+  System Admin/Records Manager/Partner roles) — flagged as a follow-up, not
+  built here.
+- **Automated browser (E2E) test suite** — `tests/browser/` (Playwright),
+  a dev/CI-only tool kept outside the deployed app so the app itself stays
+  dependency-free (no build step, no Composer, no npm at runtime). Covers
+  authentication (login, lockout, forced password reset), RBAC across
+  built-in and custom admin-configured roles including audit-log scoping,
+  security headers, and the physical-file custody workflow (auto-approved
+  vs. pending-approval checkout, and the data-driven managing-partner
+  override). `tests/smoke.php` still covers the business logic layer
+  directly; this suite exercises the same logic through real HTTP
+  requests and a real browser session. See `tests/browser/README.md` for
+  how to run it and its one known limitation (the Bootstrap modal itself
+  isn't click-tested — its CDN dependency isn't reachable from every
+  environment — so the suite drives the same action endpoints the modal
+  calls directly instead).
 - **PDF text extraction is best-effort, not a full PDF parser.** It handles
   typical born-digital PDFs (Word/PDF exports — the common case for legal
   documents) well, but can miss or garble text in PDFs using heavily
-  subsetted/custom-encoded fonts, and finds nothing at all in scanned/
-  image-only PDFs — see the OCR bullet above for why those specifically
-  aren't covered yet. `.doc`/`.xls`/`.ppt` (legacy binary Office formats)
-  are not extracted at all (flagged `UNSUPPORTED`, not silently guessed at);
-  standalone images are OCR'd instead (see above).
+  subsetted/custom-encoded fonts, and finds nothing at upload time in
+  scanned/image-only PDFs — those are picked up shortly after by the OCR
+  sweep instead (see the OCR bullets above). `.doc`/`.xls`/`.ppt` (legacy
+  binary Office formats) are not extracted at all (flagged `UNSUPPORTED`,
+  not silently guessed at); standalone images are OCR'd inline (see above).
 - **Full-text search on short/numeric tokens is limited by MySQL's own
   FULLTEXT defaults** (`innodb_ft_min_token_size`, default 3 characters) —
   a purely numeric dollar amount like `$12,000,000` tokenizes into pieces
@@ -342,6 +483,20 @@ at all.
   `SELECT ... FOR UPDATE` on before reading the chain tip. InnoDB holds
   that row lock until commit, which serializes writers the same way the
   advisory lock did.
+- **Not every audit_log row is chain-hashed.** Security review 2026-09-03,
+  finding 4.3: at current volume, routine `VIEW` actions (opening a matter,
+  opening a digital document) were themselves generating 89,000+
+  chain-locked writes in 30 days — a real contention point on that one
+  `audit_chain_state` row. `custodia_audit_record()` now takes a `chained`
+  flag; VIEW call sites pass `chained => false` and skip the lock and the
+  hash entirely (a plain, actual `DOWNLOAD` of a document still goes
+  through the full chain — only the inline-view case is exempt). Those rows
+  still get written — `audit_log` stays append-only and every VIEW is still
+  logged, filterable, and exportable — they're just not part of the
+  cryptographic chain, and `custodia_audit_verify_chain()` only ever walks
+  rows where `entry_hash IS NOT NULL`. Existing installs need
+  `sql/upgrade_019_unchained_view_events.sql` (makes `prev_hash`/
+  `entry_hash` nullable) — a fresh install's `sql/schema.sql` already has it.
 - **UUIDs are generated in PHP**, not by MySQL, matching the earlier
   version's approach — application code always knows the id of a row it
   just created, and it keeps the schema portable.

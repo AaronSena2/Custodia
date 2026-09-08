@@ -131,32 +131,26 @@ try {
       <button class="btn btn-sm btn-outline-secondary w-100 d-flex align-items-center justify-content-center gap-2 position-relative" type="button" id="notificationBellToggle" data-bs-toggle="dropdown" data-bs-strategy="fixed" aria-expanded="false">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         Notifications
-        <?php if ($sidebarUnreadNotificationCount > 0): ?>
-          <span class="sidebar-nav-badge"><?= (int) $sidebarUnreadNotificationCount ?></span>
-        <?php endif; ?>
+        <span class="sidebar-nav-badge <?= $sidebarUnreadNotificationCount > 0 ? '' : 'd-none' ?>" id="notificationBellBadge"><?= (int) $sidebarUnreadNotificationCount ?></span>
       </button>
       <div class="dropdown-menu shadow-sm" style="width: 340px; max-height: 420px; overflow-y: auto;" aria-labelledby="notificationBellToggle">
         <div class="d-flex justify-content-between align-items-center px-3 py-2">
           <span class="fw-semibold small">Notifications</span>
-          <?php if ($sidebarUnreadNotificationCount > 0): ?>
-            <button type="button" class="btn btn-link btn-sm p-0" onclick="custodiaMarkAllNotificationsRead()">Mark all read</button>
-          <?php endif; ?>
+          <div class="d-flex align-items-center gap-2">
+            <button type="button" class="btn btn-link btn-sm p-0 text-body-secondary" onclick="custodiaToggleNotificationSound()" title="Toggle notification sound" id="notificationSoundToggle">
+              <svg class="sound-icon-on" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+              <svg class="sound-icon-off" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m17 9 5 6M22 9l-5 6"/></svg>
+            </button>
+            <button type="button" class="btn btn-link btn-sm p-0 <?= $sidebarUnreadNotificationCount > 0 ? '' : 'd-none' ?>" onclick="custodiaMarkAllNotificationsRead()" id="notificationMarkAllBtn">Mark all read</button>
+          </div>
         </div>
         <div class="dropdown-divider"></div>
+        <div id="notificationDropdownBody">
         <?php if (empty($sidebarNotifications)): ?>
-          <div class="text-center text-muted small py-4">Nothing yet.</div>
+          <div class="text-center text-muted small py-4" id="notificationEmptyState">Nothing yet.</div>
         <?php else: ?>
           <?php foreach ($sidebarNotifications as $n): ?>
-            <?php
-              $notifHref = 'dashboard.php';
-              if ($n['entity_type'] === 'MATTER' && $n['entity_id']) {
-                  $notifHref = 'matter.php?id=' . urlencode($n['entity_id']);
-              } elseif ($n['entity_type'] === 'DIGITAL_DOCUMENT' && $n['entity_id']) {
-                  $notifHref = 'shared_with_me.php';
-              } elseif ($n['entity_type'] === 'SYSTEM_REPORT' && $n['entity_id']) {
-                  $notifHref = 'reports.php?id=' . urlencode($n['entity_id']);
-              }
-            ?>
+            <?php $notifHref = custodia_notification_link($n); ?>
             <a href="<?= e($notifHref) ?>" class="dropdown-item py-2 <?= $n['read_at'] ? '' : 'bg-light-unread' ?>" onclick="return custodiaOpenNotification(event, '<?= e($n['id']) ?>', '<?= e($notifHref) ?>')" style="white-space: normal;">
               <div class="small fw-semibold"><?= e($n['title']) ?><?= $n['read_at'] ? '' : ' <span class="badge text-bg-primary ms-1">new</span>' ?></div>
               <?php if ($n['body']): ?><div class="small text-muted"><?= e($n['body']) ?></div><?php endif; ?>
@@ -164,9 +158,14 @@ try {
             </a>
           <?php endforeach; ?>
         <?php endif; ?>
+        </div>
+        <div class="dropdown-divider"></div>
+        <a href="notifications.php" class="dropdown-item py-2 text-center small fw-semibold">See all notifications</a>
       </div>
     </div>
     <script>
+    let custodiaLastUnreadNotificationCount = <?= (int) $sidebarUnreadNotificationCount ?>;
+
     function custodiaOpenNotification(evt, id, href) {
       evt.preventDefault();
       custodiaPost('actions/mark_notification_read.php', { notificationId: id })
@@ -180,6 +179,78 @@ try {
         window.location.reload();
       } catch (e) {}
     }
+
+    /**
+     * Rebuilds the bell badge + dropdown list from a fresh
+     * actions/list_recent_notifications.php payload — same shape as the
+     * PHP-rendered markup above, so a page left open keeps showing new
+     * notifications (and the count that matters for custodiaPollNotifications()'s
+     * sound trigger) without a manual refresh, same "quiet poll + redraw"
+     * pattern dashboard.php uses for its analytics charts.
+     */
+    function custodiaRenderNotificationDropdown(payload) {
+      const badge = document.getElementById('notificationBellBadge');
+      badge.textContent = String(payload.unreadCount);
+      badge.classList.toggle('d-none', payload.unreadCount === 0);
+      document.getElementById('notificationMarkAllBtn').classList.toggle('d-none', payload.unreadCount === 0);
+
+      const body = document.getElementById('notificationDropdownBody');
+      body.innerHTML = '';
+      if (payload.notifications.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'text-center text-muted small py-4';
+        empty.textContent = 'Nothing yet.';
+        body.appendChild(empty);
+        return;
+      }
+      payload.notifications.forEach((n) => {
+        const a = document.createElement('a');
+        a.href = n.href;
+        a.className = 'dropdown-item py-2' + (n.isUnread ? ' bg-light-unread' : '');
+        a.style.whiteSpace = 'normal';
+        a.onclick = (evt) => custodiaOpenNotification(evt, n.id, n.href);
+
+        const titleRow = document.createElement('div');
+        titleRow.className = 'small fw-semibold';
+        titleRow.textContent = n.title;
+        if (n.isUnread) {
+          const badgeEl = document.createElement('span');
+          badgeEl.className = 'badge text-bg-primary ms-1';
+          badgeEl.textContent = 'new';
+          titleRow.appendChild(badgeEl);
+        }
+        a.appendChild(titleRow);
+
+        if (n.body) {
+          const bodyRow = document.createElement('div');
+          bodyRow.className = 'small text-muted';
+          bodyRow.textContent = n.body;
+          a.appendChild(bodyRow);
+        }
+
+        const dateRow = document.createElement('div');
+        dateRow.className = 'small text-muted';
+        dateRow.textContent = n.createdAt;
+        a.appendChild(dateRow);
+
+        body.appendChild(a);
+      });
+    }
+
+    /** Quiet poll for new notifications — plays a sound the moment the unread count goes up. See app.js for custodiaPlayNotificationSound(). */
+    async function custodiaPollNotifications() {
+      try {
+        const payload = await custodiaGet('actions/list_recent_notifications.php');
+        if (payload.unreadCount > custodiaLastUnreadNotificationCount) {
+          custodiaPlayNotificationSound();
+        }
+        custodiaLastUnreadNotificationCount = payload.unreadCount;
+        custodiaRenderNotificationDropdown(payload);
+      } catch (e) {
+        // Transient failure — skip this tick, try again next interval.
+      }
+    }
+    setInterval(custodiaPollNotifications, 20000);
     </script>
     <div class="sidebar-footer">
       <div class="sidebar-avatar"><?= e(custodia_initials($user['full_name'])) ?></div>

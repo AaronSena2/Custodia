@@ -104,12 +104,15 @@
 [data-bs-theme="dark"] .m365-badge-recommended   { background: rgba(59, 130, 246, 0.16); border-color: rgba(59, 130, 246, 0.35); color: #60a5fa; }
 [data-bs-theme="dark"] .m365-badge-healthy       { background: rgba(34, 197, 94, 0.16); border-color: rgba(34, 197, 94, 0.35); color: #4ade80; }
 
-/* Unread-notification highlight in the sidebar bell dropdown — a custom
+/* Unread-notification highlight — used by both the sidebar bell dropdown
+   (.bg-light-unread, on a .dropdown-item) and the full notifications.php
+   inbox (.notification-row.unread, a plain row there instead). A custom
    class instead of Bootstrap's .bg-light utility, which stays a fixed light
    gray under data-bs-theme="dark" (it isn't one of the theme-aware "subtle"
    utilities), so it would leave a jarring light patch in dark mode. */
-.dropdown-item.bg-light-unread { background-color: #f8fafc; }
-[data-bs-theme="dark"] .dropdown-item.bg-light-unread { background-color: rgba(45, 212, 191, 0.08) !important; }
+.dropdown-item.bg-light-unread, .notification-row.unread { background-color: #f8fafc; }
+[data-bs-theme="dark"] .dropdown-item.bg-light-unread,
+[data-bs-theme="dark"] .notification-row.unread { background-color: rgba(45, 212, 191, 0.08) !important; }
 
 * { box-sizing: border-box; }
 
@@ -126,6 +129,13 @@ h1, h2, h3, h4, h5, h6 {
 
 a { color: var(--cus-accent-dark); }
 a:hover { color: var(--cus-accent); }
+
+/* Bootstrap's .text-muted utility reads --bs-secondary-color, a translucent
+   tint of the body color rather than this app's own --cus-muted — same gap
+   as .card/.table/.form-control/.accordion above, just for a utility class
+   instead of a component. Used everywhere: table cells, card subtitles,
+   the notification dropdown's timestamps. */
+.text-muted { color: var(--cus-muted) !important; }
 
 /* ---------------------------------------------------------------------- */
 /* App shell: fixed dark sidebar + light content column                   */
@@ -336,6 +346,11 @@ a:hover { color: var(--cus-accent); }
 [data-bs-theme="dark"] .theme-icon-sun { display: block; }
 [data-bs-theme="dark"] .theme-icon-moon { display: none; }
 
+/* Sidebar bell dropdown's mute toggle — same show/hide-by-attribute pattern as the theme icons above. */
+.sound-icon-off { display: none; }
+[data-notif-sound="muted"] .sound-icon-on { display: none; }
+[data-notif-sound="muted"] .sound-icon-off { display: block; }
+
 .app-content {
   flex: 1;
   min-width: 0;
@@ -398,6 +413,11 @@ a:hover { color: var(--cus-accent); }
 /* ---------------------------------------------------------------------- */
 
 .card {
+  /* Bootstrap's own --bs-card-bg is a generic gray in dark mode, not this
+     app's navy --cus-card — every card (and every table wrapped in one)
+     needs the explicit override, same reasoning as the .table block below. */
+  background-color: var(--cus-card);
+  color: var(--cus-ink);
   border: 1px solid var(--cus-border);
   border-radius: 12px;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
@@ -409,6 +429,13 @@ a:hover { color: var(--cus-accent); }
   font-weight: 700;
   border-top-left-radius: 12px !important;
   border-top-right-radius: 12px !important;
+}
+
+/* .card-header.bg-white (used throughout for a "flat" header matching the
+   card body) is Bootstrap's plain white utility — a fixed color, not theme-
+   aware — so it stays a bright white bar on a dark card unless overridden. */
+.card-header.bg-white {
+  background-color: var(--cus-card) !important;
 }
 
 .stat-tile {
@@ -439,6 +466,14 @@ a:hover { color: var(--cus-accent); }
 }
 
 .table {
+  /* Bootstrap's table cells read --bs-table-bg/--bs-table-color directly
+     (with inheritance-beating specificity — a plain `.table { color: ... }`
+     rule loses to it), and those default to Bootstrap's own generic gray/
+     white in dark mode rather than this app's --cus-card/--cus-ink-soft.
+     Redefining the variables Bootstrap's own cell rules already consume is
+     the idiomatic fix — same pattern as --bs-table-hover-bg below. */
+  --bs-table-bg: var(--cus-card);
+  --bs-table-color: var(--cus-ink-soft);
   color: var(--cus-ink-soft);
   margin-bottom: 0;
   --bs-table-hover-bg: rgba(13, 148, 136, 0.06); /* every .table-hover row gets the same teal tint, not just clickable ones */
@@ -549,6 +584,68 @@ a:hover { color: var(--cus-accent); }
 .action-badge-red    { background: #fee2e2; color: #991b1b; }
 .action-badge-gray   { background: #f1f5f9; color: #475569; }
 
+/* Matter-number "chip" — folder icon + the number itself in one small pill,
+   color-coded by confidentiality tier (STANDARD/RESTRICTED/PRIVILEGED) —
+   see includes/helpers.php's custodia_matter_number_chip(). Three distinct
+   colors, unlike custodia_confidentiality_badge()'s two-way text-badge split,
+   since a compact chip reads fine with more granularity at a glance. */
+.matter-number-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px 3px 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-family: var(--cus-mono);
+  font-weight: 700;
+  font-size: 0.84em;
+  letter-spacing: 0.01em;
+  line-height: 1.5;
+  white-space: nowrap;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.matter-number-chip:hover { transform: translateY(-1px); }
+.matter-folder-icon { flex-shrink: 0; }
+
+.matter-tier-standard {
+  color: var(--cus-ink-soft);
+  background: rgba(100, 116, 139, 0.10);
+  border-color: rgba(100, 116, 139, 0.22);
+}
+.matter-tier-standard:hover { box-shadow: 0 3px 10px rgba(100, 116, 139, 0.18); }
+
+.matter-tier-restricted {
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+  box-shadow: 0 1px 3px rgba(245, 158, 11, 0.15);
+}
+.matter-tier-restricted:hover { box-shadow: 0 3px 10px rgba(245, 158, 11, 0.25); }
+
+.matter-tier-privileged {
+  color: var(--cus-danger);
+  background: rgba(220, 38, 38, 0.10);
+  border-color: rgba(220, 38, 38, 0.32);
+  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.18);
+}
+.matter-tier-privileged:hover { box-shadow: 0 3px 10px rgba(220, 38, 38, 0.28); }
+
+[data-bs-theme="dark"] .matter-tier-standard {
+  color: #cbd5e1;
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.28);
+}
+[data-bs-theme="dark"] .matter-tier-restricted {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.38);
+}
+[data-bs-theme="dark"] .matter-tier-privileged {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.14);
+  border-color: rgba(248, 113, 113, 0.38);
+}
+
 /* ---------------------------------------------------------------------- */
 /* Buttons                                                                */
 /* ---------------------------------------------------------------------- */
@@ -562,6 +659,28 @@ a:hover { color: var(--cus-accent); }
 .btn-primary:hover, .btn-primary:focus {
   background-color: #0e6b64;
   border-color: #0e6b64;
+}
+/* --cus-accent-dark is brighter in dark mode (#14b8a6 vs #0f766e), so the
+   light theme's fixed hover-darken shade above would look muddy/mismatched
+   against it — darken relative to dark mode's own base color instead. */
+[data-bs-theme="dark"] .btn-primary:hover,
+[data-bs-theme="dark"] .btn-primary:focus {
+  background-color: var(--cus-accent);
+  border-color: var(--cus-accent);
+}
+
+/* Bootstrap's .btn-outline-secondary (bell toggle, most "Edit"/"Rename"
+   buttons app-wide) hover-fills to a fixed gray (--bs-btn-hover-bg: #6c757d)
+   with no theme awareness at all — same gap as everything else above, just
+   for this specific outline variant. */
+.btn-outline-secondary {
+  color: var(--cus-muted);
+  border-color: var(--cus-border);
+}
+.btn-outline-secondary:hover {
+  background-color: var(--cus-muted);
+  border-color: var(--cus-muted);
+  color: var(--cus-card);
 }
 
 .btn-outline-primary {
@@ -579,7 +698,13 @@ a:hover { color: var(--cus-accent); }
    hover, a tinted color per semantic variant, even spacing regardless of
    label length. One rule set, so every one of these across the app looks
    identical rather than each page having its own subtly different take. */
-.btn-group-sm > .btn {
+/* :not(.btn-primary) — a solid .btn-primary ("+ New Client"/"+ New User"/etc.)
+   sometimes sits in a .btn-group-sm wrapper purely for spacing next to a
+   sibling button, not as a row-action toolbar item. Without this exclusion,
+   this rule's 2-class specificity beats .btn-primary's 1-class rule below,
+   flattening it to ghost-text instead of its intended solid teal button —
+   at rest and on hover, in both themes. */
+.btn-group-sm > .btn:not(.btn-primary) {
   border-radius: 6px !important;
   margin-left: 3px !important;
   border-color: transparent;
@@ -590,8 +715,9 @@ a:hover { color: var(--cus-accent); }
   padding: 0.3rem 0.6rem;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
+.btn-group-sm > .btn-primary { margin-left: 3px !important; }
 .btn-group-sm > .btn:first-child { margin-left: 0 !important; }
-.btn-group-sm > .btn:hover {
+.btn-group-sm > .btn:not(.btn-primary):hover {
   background-color: var(--cus-bg);
   border-color: transparent;
   color: var(--cus-ink);
@@ -738,17 +864,63 @@ a:hover { color: var(--cus-accent); }
 /* Modals                                                                 */
 /* ---------------------------------------------------------------------- */
 
-.modal-content { border-radius: 14px; border: none; }
+.modal-content {
+  /* Same gap as .card/.table — Bootstrap's own --bs-modal-bg is a generic
+     dark gray in dark mode, not this app's navy --cus-card. */
+  background-color: var(--cus-card);
+  color: var(--cus-ink);
+  border-radius: 14px;
+  border: none;
+}
 .modal-header { border-bottom: 1px solid var(--cus-border); }
 .modal-footer { border-top: none; padding-top: 0; }
 
+/* ---------------------------------------------------------------------- */
+/* Accordion (User Manual)                                                */
+/* ---------------------------------------------------------------------- */
+
+/* Same gap as .card/.table/.modal-content/.form-control — Bootstrap's own
+   accordion colors (a generic gray body, a dark-blue expanded-header tint,
+   Bootstrap-blue button text) don't match this app's navy/teal palette. */
+.accordion-item {
+  background-color: var(--cus-card);
+  color: var(--cus-ink);
+  border-color: var(--cus-border);
+}
+.accordion-button {
+  background-color: var(--cus-card);
+  color: var(--cus-ink);
+}
+.accordion-button:not(.collapsed) {
+  background-color: var(--cus-card);
+  color: var(--cus-accent-dark);
+  box-shadow: inset 0 -1px 0 var(--cus-border);
+}
+.accordion-button:focus {
+  border-color: var(--cus-accent);
+  box-shadow: 0 0 0 0.2rem rgba(13, 148, 136, 0.15);
+}
+.accordion-body { color: var(--cus-ink-soft); }
+
 .form-control, .form-select {
+  /* Same gap again — Bootstrap's own dark-mode form colors are a generic
+     gray, not this app's navy --cus-card, so every input/select/textarea
+     across every modal and filter bar needs the explicit override. */
+  background-color: var(--cus-card);
+  color: var(--cus-ink);
   border-radius: 8px;
   border-color: var(--cus-border);
 }
 .form-control:focus, .form-select:focus {
+  background-color: var(--cus-card);
+  color: var(--cus-ink);
   border-color: var(--cus-accent);
   box-shadow: 0 0 0 0.2rem rgba(13, 148, 136, 0.15);
+}
+.form-control::placeholder { color: var(--cus-muted); opacity: 1; }
+.form-control:disabled, .form-select:disabled {
+  background-color: var(--cus-bg);
+  color: var(--cus-muted);
 }
 
 /* Toggle-button style radio group (Share modal "View Only" / "View & Download") */
@@ -830,6 +1002,7 @@ a:hover { color: var(--cus-accent); }
   padding: 1rem 1.25rem;
 }
 .chart-card-body canvas { max-height: 260px; }
+.chart-card-body-tall canvas { max-height: 560px; }
 .chart-empty-state {
   height: 220px;
   display: flex;

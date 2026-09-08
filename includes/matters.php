@@ -7,6 +7,7 @@ require_once __DIR__ . '/audit.php';
 require_once __DIR__ . '/matter_access.php';
 require_once __DIR__ . '/permissions.php';
 require_once __DIR__ . '/clients.php';
+require_once __DIR__ . '/practice_groups.php';
 
 function custodia_firm_wide_reach_matters(PDO $pdo, array $user): array
 {
@@ -111,6 +112,7 @@ function custodia_matter_detail(PDO $pdo, array $user, string $matterId, string 
     try {
         custodia_audit_record($pdo, [
             'actorId' => $user['id'], 'actionType' => 'VIEW', 'entityType' => 'MATTER', 'entityId' => $matter['id'], 'ipAddress' => $ipAddress,
+            'chained' => false, // routine VIEW — see custodia_audit_record()'s 'chained' doc comment (finding 4.3)
         ]);
         $pdo->commit();
     } catch (Throwable $e) {
@@ -147,6 +149,7 @@ function custodia_client_detail(PDO $pdo, array $user, string $clientId, string 
     try {
         custodia_audit_record($pdo, [
             'actorId' => $user['id'], 'actionType' => 'VIEW', 'entityType' => 'CLIENT', 'entityId' => $clientId, 'ipAddress' => $ipAddress,
+            'chained' => false, // routine VIEW — see custodia_audit_record()'s 'chained' doc comment (finding 4.3)
         ]);
         $pdo->commit();
     } catch (Throwable $e) {
@@ -170,6 +173,16 @@ function custodia_create_matter(PDO $pdo, array $user, array $dto, string $ipAdd
         throw custodia_bad_request('Select a client for this matter.');
     }
 
+    // Without this check, a duplicate matter_number falls through to the
+    // database's own UNIQUE constraint, which action_bootstrap.php's
+    // catch-all turns into a generic 500 "Unexpected server error" rather
+    // than a message that actually explains what's wrong.
+    $dupe = $pdo->prepare('SELECT id FROM matters WHERE matter_number = :num');
+    $dupe->execute(['num' => $dto['matterNumber']]);
+    if ($dupe->fetch()) {
+        throw custodia_bad_request('A matter with that matter number already exists.');
+    }
+
     $pdo->beginTransaction();
     try {
         $id = custodia_uuid();
@@ -186,6 +199,13 @@ function custodia_create_matter(PDO $pdo, array $user, array $dto, string $ipAdd
         custodia_audit_record($pdo, [
             'actorId' => $user['id'], 'actionType' => 'MATTER_CREATED', 'entityType' => 'MATTER', 'entityId' => $id, 'ipAddress' => $ipAddress,
         ]);
+
+        // Standing firm policy: the "Registry" practice group sees every
+        // matter by default — see custodia_auto_grant_registry_group_access()'s
+        // doc comment. Part of this same transaction so it can't create a
+        // matter with no Registry grant (or vice versa) on a mid-request failure.
+        custodia_auto_grant_registry_group_access($pdo, $user, $id, $ipAddress);
+
         $pdo->commit();
         return ['id' => $id];
     } catch (Throwable $e) {

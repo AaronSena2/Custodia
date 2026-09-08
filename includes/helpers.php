@@ -104,6 +104,49 @@ function custodia_confidentiality_badge(string $tier): string
     return "<span class=\"badge text-bg-{$variant}\">" . htmlspecialchars($tier) . "</span>";
 }
 
+/** CSS class per confidentiality tier for custodia_matter_number_chip() below — three distinct colors (unlike custodia_confidentiality_badge()'s two-way STANDARD-vs-not split), since a small chip reads fine at a glance with more granularity than a text badge needs. Colors/tints/dark-mode variants all live in assets/css/app.css. */
+const CUSTODIA_CONFIDENTIALITY_ICON_CLASS = [
+    'STANDARD' => 'matter-tier-standard',
+    'RESTRICTED' => 'matter-tier-restricted',
+    'PRIVILEGED' => 'matter-tier-privileged',
+];
+
+/**
+ * Two-tone filled folder glyph — a back panel at partial opacity plus a
+ * solid front pocket, both painted from `currentColor`, so it picks up
+ * whatever tier color its wrapping .matter-tier-* class sets without any
+ * per-tier markup of its own. Dependency-free inline SVG, matching every
+ * other icon in this app (see includes/layout_header.php's CUSTODIA_NAV_ICONS),
+ * just filled rather than outlined for a bit more visual weight here.
+ */
+function custodia_matter_folder_icon(): string
+{
+    return '<svg class="matter-folder-icon" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">'
+        . '<path fill="currentColor" fill-opacity="0.35" d="M2.5 6.3A2 2 0 0 1 4.5 4.3h4.6l2.1 2.3H19.5a2 2 0 0 1 2 2v9.1a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2Z"/>'
+        . '<path fill="currentColor" d="M2.5 9.1h19v8.6a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2Z"/>'
+        . '</svg>';
+}
+
+/**
+ * Matter number rendered as a small color-coded pill — folder icon + the
+ * number itself, tinted background/border/text all keyed to the matter's
+ * confidentiality tier (gray/amber/red for STANDARD/RESTRICTED/PRIVILEGED).
+ * This is what every render site uses now instead of a bare icon next to
+ * plain text; see .matter-number-chip/.matter-tier-* in assets/css/app.css
+ * for the actual styling. Falls back to the STANDARD tier's look for any
+ * unrecognized confidentiality value rather than failing, since the visual
+ * here is decorative — custodia_confidentiality_badge() elsewhere is still
+ * the source of truth for the tier's name.
+ */
+function custodia_matter_number_chip(string $matterNumber, string $confidentiality): string
+{
+    $class = CUSTODIA_CONFIDENTIALITY_ICON_CLASS[$confidentiality] ?? CUSTODIA_CONFIDENTIALITY_ICON_CLASS['STANDARD'];
+    return '<span class="matter-number-chip ' . $class . '">'
+        . custodia_matter_folder_icon()
+        . '<span class="matter-number-text">' . htmlspecialchars($matterNumber) . '</span>'
+        . '</span>';
+}
+
 /** Badge for a digital_documents.is_protected row — view permission required, download disabled. */
 function custodia_protected_badge(): string
 {
@@ -149,6 +192,13 @@ const CUSTODIA_ACTION_BADGE_COLORS = [
     'ROLE_DELETED' => 'red',
     'CLIENTS_BULK_IMPORTED' => 'teal',
     'USERS_BULK_IMPORTED' => 'teal',
+    'AUDIT_CHAIN_VERIFIED' => 'green',
+    'AUDIT_CHAIN_BROKEN' => 'red',
+    'OVERDUE_SWEEP_RUN' => 'gray',
+    'RETENTION_SWEEP_RUN' => 'gray',
+    'RETENTION_POLICY_CREATED' => 'teal',
+    // Security review 2026-09-03, finding 2.1 — firm-wide default retention policy.
+    'RETENTION_POLICY_DEFAULT_SET' => 'blue',
 ];
 
 /** Display-only overrides for the audit log's action-type pills — the stored action_type string is unchanged. */
@@ -181,11 +231,34 @@ const CUSTODIA_EXTRACTION_STATUS_LABELS = [
     'DONE' => 'Indexed for search',
     'UNSUPPORTED' => 'File type not indexed',
     'FAILED' => 'No extractable text',
+    // Security review 2026-09-03, finding 4.4: distinct from plain FAILED —
+    // see CUSTODIA_SCANNABLE_EXTRACTION_EXTENSIONS in text_extract.php.
+    'NO_TEXT_LAYER' => 'Scanned — not searchable (needs OCR)',
+];
+
+/** Badge color per extraction_status — success is quiet, everything that means "you can't find this by searching" is amber/red and visible, not a same-color muted table cell (finding 4.4: the old plain-text rendering read as invisible). */
+const CUSTODIA_EXTRACTION_STATUS_BADGE_COLORS = [
+    'PENDING' => 'gray',
+    'DONE' => 'green',
+    'UNSUPPORTED' => 'gray',
+    'FAILED' => 'red',
+    'NO_TEXT_LAYER' => 'amber',
 ];
 
 function custodia_extraction_status_label(string $status): string
 {
     return CUSTODIA_EXTRACTION_STATUS_LABELS[$status] ?? $status;
+}
+
+/** Visible badge (not plain muted text) for a document_versions.extraction_status value — see custodia_extraction_status_label(). */
+function custodia_extraction_status_badge(string $status): string
+{
+    $color = CUSTODIA_EXTRACTION_STATUS_BADGE_COLORS[$status] ?? 'gray';
+    $label = htmlspecialchars(custodia_extraction_status_label($status));
+    $title = $status === 'NO_TEXT_LAYER'
+        ? ' title="This looks like a scanned page with no text layer, so full-text search won\'t find it. Re-upload a text-based version, or run OCR, to make it searchable."'
+        : '';
+    return "<span class=\"action-badge action-badge-{$color}\"{$title}>{$label}</span>";
 }
 
 /**

@@ -12,7 +12,7 @@ require_once __DIR__ . '/includes/clients.php';
 $user = custodia_require_login();
 $pdo = custodia_db();
 
-$analytics = custodia_dashboard_analytics($pdo, $user);
+$analytics = custodia_dashboard_analytics_cached($pdo, $user);
 
 $overdueFiles = custodia_list_overdue_files($pdo, $user);
 $pendingMovements = custodia_list_pending_for_approver($pdo, $user);
@@ -30,6 +30,16 @@ $mostRequestedTotal = array_sum(array_column($mostRequestedMatters, 'count'))
 
 $clients = custodia_list_clients($pdo, $user);
 $clientsWithoutMatters = array_values(array_filter($clients, fn($c) => (int) $c['matter_count'] === 0));
+
+// Top clients by matter count — deliberately NOT gated behind any of the
+// $show*Widget permission checks below: every non-Guest/Auditor user already
+// sees every client and its matter_count via clients.php itself (see
+// custodia_list_clients()), so a ranked view of the same numbers on the
+// dashboard discloses nothing new. GUEST_AUDITOR gets an empty $clients
+// array already, so this naturally renders as "No clients yet." for them.
+$topClientsByMatters = $clients;
+usort($topClientsByMatters, fn($a, $b) => (int) $b['matter_count'] <=> (int) $a['matter_count']);
+$topClientsByMatters = array_slice($topClientsByMatters, 0, 20);
 
 $groupsWithNoMembers = array_values(array_filter($analytics['groupComparison'], fn($g) => $g['memberCount'] === 0));
 
@@ -391,6 +401,14 @@ require __DIR__ . '/includes/layout_header.php';
   </div>
   <?php endif; ?>
 
+  <div class="card">
+    <div class="card-header bg-white fw-semibold">Top Clients by Matter Count <span class="text-muted fw-normal small">— top 20, visible to everyone</span></div>
+    <div class="chart-card-body chart-card-body-tall">
+      <canvas id="topClientsChart" height="640"></canvas>
+      <div id="topClientsEmpty" class="chart-empty-state d-none">No clients yet.</div>
+    </div>
+  </div>
+
   </div>
 
 </div>
@@ -398,6 +416,15 @@ require __DIR__ . '/includes/layout_header.php';
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
 const CUSTODIA_INITIAL_ANALYTICS = <?= json_encode($analytics, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
+
+// Top Clients by Matter Count — not part of the cached/live-refreshing
+// analytics payload above (it doesn't need a 45s refresh), so it's embedded
+// as its own constant the same way CUSTODIA_INITIAL_ANALYTICS is, and
+// rendered as its own chart inside custodiaRenderAnalyticsCharts() below.
+const CUSTODIA_TOP_CLIENTS = <?= json_encode(array_map(
+    fn($c) => ['id' => $c['id'], 'name' => $c['name'], 'matterCount' => (int) $c['matter_count']],
+    $topClientsByMatters
+), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
 
 // Same hex values as .action-badge-* in assets/css/app.css, so a bar's color
 // always matches that action type's badge color everywhere else in the app.
@@ -646,6 +673,53 @@ function custodiaRenderAnalyticsCharts(data) {
         maintainAspectRatio: false,
         plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true } } },
         scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+      },
+    });
+  }
+
+  const hasTopClients = CUSTODIA_TOP_CLIENTS.length > 0;
+  custodiaToggleEmpty('topClientsChart', 'topClientsEmpty', !hasTopClients);
+  custodiaDestroyChart('topClients');
+  if (hasTopClients) {
+    // Left-to-right in rank order (#1 first) — unlike the horizontal bar
+    // charts above, a line reads naturally left-to-right, so this one isn't
+    // reversed.
+    custodiaCharts.topClients = new Chart(document.getElementById('topClientsChart'), {
+      type: 'line',
+      data: {
+        labels: CUSTODIA_TOP_CLIENTS.map(c => c.name.length > 20 ? c.name.slice(0, 17) + '…' : c.name),
+        datasets: [{
+          data: CUSTODIA_TOP_CLIENTS.map(c => c.matterCount),
+          borderColor: '#0d9488',
+          backgroundColor: 'rgba(13, 148, 136, 0.12)',
+          tension: 0.3,
+          fill: true,
+          pointRadius: 3,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#0d9488',
+          borderWidth: 2,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        onHover: (evt, elements) => { evt.native.target.style.cursor = elements.length ? 'pointer' : 'default'; },
+        onClick: (evt, elements) => {
+          if (elements.length) window.location = 'client.php?id=' + encodeURIComponent(CUSTODIA_TOP_CLIENTS[elements[0].index].id);
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: (items) => CUSTODIA_TOP_CLIENTS[items[0].dataIndex].name,
+              label: (ctx) => `${ctx.parsed.y} matter${ctx.parsed.y === 1 ? '' : 's'}`,
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { maxRotation: 60, minRotation: 60, autoSkip: false, font: { size: 10 } } },
+          y: { beginAtZero: true, ticks: { precision: 0 } },
+        },
       },
     });
   }

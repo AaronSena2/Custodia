@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/helpers.php';
 
 $existingUser = custodia_current_user();
@@ -7,6 +8,11 @@ if ($existingUser) {
     header('Location: dashboard.php');
     exit;
 }
+
+$pdo = custodia_db();
+
+$notice = $_SESSION['login_notice'] ?? null;
+unset($_SESSION['login_notice']);
 
 $error = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -22,7 +28,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: ' . $redirect);
         exit;
     }
-    $error = 'Incorrect email or password.';
+
+    // Security review 2026-09-03, finding 1.6: a locked account gets a
+    // distinct message (and the password is never even checked while
+    // locked — see custodia_attempt_login()) rather than the generic
+    // "Incorrect email or password" every other failure shows.
+    $lockMinutes = custodia_account_lock_remaining_minutes($pdo, $email);
+    $error = $lockMinutes !== null
+        ? 'Too many failed attempts. This account is temporarily locked — try again in '
+            . $lockMinutes . ' minute' . ($lockMinutes === 1 ? '' : 's') . '.'
+        : 'Incorrect email or password.';
 }
 
 custodia_start_session();
@@ -47,6 +62,9 @@ custodia_start_session();
   </div>
   <div class="card shadow-sm">
     <div class="card-body p-4">
+      <?php if ($notice): ?>
+        <div class="alert alert-info py-2"><?= e($notice) ?></div>
+      <?php endif; ?>
       <?php if ($error): ?>
         <div class="alert alert-danger py-2"><?= e($error) ?></div>
       <?php endif; ?>
@@ -62,18 +80,6 @@ custodia_start_session();
         </div>
         <button class="btn btn-primary w-100" type="submit">Sign in</button>
       </form>
-    </div>
-  </div>
-  <div class="card mt-3">
-    <div class="card-body p-3">
-      <p class="small text-muted mb-1 fw-semibold">Demo accounts (password: ChangeMe123!)</p>
-      <ul class="small text-muted mb-0 ps-3">
-        <li>sam.okafor@custodia.demo — System Administrator</li>
-        <li>rita.alvarez@custodia.demo — Records Manager</li>
-        <li>daniel.reyes@custodia.demo — Partner</li>
-        <li>elena.cho@custodia.demo — Associate</li>
-        <li>marcus.webb@custodia.demo — Paralegal</li>
-      </ul>
     </div>
   </div>
 </main>

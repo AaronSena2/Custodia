@@ -5,6 +5,7 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/errors.php';
 require_once __DIR__ . '/audit.php';
 require_once __DIR__ . '/permissions.php';
+require_once __DIR__ . '/matter_access.php';
 
 /** Resolves a matterId filter into the concrete (entity_type, entity_id) pairs it covers. */
 function custodia_matter_scoped_audit_ids(PDO $pdo, string $matterId): array
@@ -35,9 +36,24 @@ function custodia_build_audit_where(PDO $pdo, array $user, array $query): array
     $params = [];
     $n = 0;
 
-    if (in_array($user['role'], ['ASSOCIATE', 'PARALEGAL'], true)) {
-        $clauses[] = 'actor_id = :scope_actor';
-        $params['scope_actor'] = $user['id'];
+    // Security review 2026-09-03, finding 2.2: this used to be
+    // if (ASSOCIATE/PARALEGAL) {narrow} elseif (PARTNER) {managed matters}
+    // with SYSTEM_ADMIN/RECORDS_MANAGER implicitly relying on falling
+    // through both branches to get "no clause = unrestricted". That's
+    // fragile the moment a role beyond the original six exists: a custom
+    // role (Legal Clerk, Front Desk, Senior Associate, ...) granted
+    // view_audit_log or export_audit_log from Admin -> Permissions — meant,
+    // like Associate/Paralegal, to see only their own actions — fell
+    // through the same two branches and silently got the SYSTEM_ADMIN/
+    // RECORDS_MANAGER "no forced scope" behavior instead: full firm-wide
+    // audit visibility. Firm-wide reach is now an explicit allow-list
+    // (matching the safe custodia_firm_wide_roles() pattern already used
+    // in matters.php/physical_files.php/access_requests.php) instead of
+    // an accidental fallthrough, and any role that isn't explicitly
+    // firm-wide or Partner-scoped now defaults to the same narrow
+    // "own actions only" floor Associate/Paralegal get.
+    if (in_array($user['role'], custodia_firm_wide_roles(), true)) {
+        // No forced scope — full visibility, unchanged from before.
     } elseif ($user['role'] === 'PARTNER') {
         $managed = $pdo->prepare('SELECT id FROM matters WHERE managing_partner_id = :uid');
         $managed->execute(['uid' => $user['id']]);
@@ -74,8 +90,10 @@ function custodia_build_audit_where(PDO $pdo, array $user, array $query): array
             }
         }
         $clauses[] = '(' . implode(' OR ', $scopeOr) . ')';
+    } else {
+        $clauses[] = 'actor_id = :scope_actor';
+        $params['scope_actor'] = $user['id'];
     }
-    // SYSTEM_ADMIN / RECORDS_MANAGER: no forced scope — full visibility.
 
     if (!empty($query['actorId'])) {
         $clauses[] = 'actor_id = :f_actor';

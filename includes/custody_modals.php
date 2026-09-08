@@ -72,7 +72,19 @@ function openTransferModal(fileId, barcode) {
   document.getElementById('transferBarcode').textContent = barcode;
   bootstrap.Modal.getOrCreateInstance(document.getElementById('transferModal')).show();
 }
-custodiaWireActionForm(document.getElementById('checkoutForm'), () => { custodiaFlash('File issued.'); window.location.reload(); });
-custodiaWireActionForm(document.getElementById('checkinForm'), () => { custodiaFlash('File returned.'); window.location.reload(); });
-custodiaWireActionForm(document.getElementById('transferForm'), () => { custodiaFlash('Transfer requested.'); window.location.reload(); });
+// Default: flash the message then reload the page, as this always did — the
+// right behavior on a page like matter.php's Physical Files tab, where you
+// want to see the updated status in place. A page can override this (define
+// window.custodiaCustodyActionComplete itself, in a <script> block BEFORE
+// this file is require()'d) for a different post-action flow — see
+// scan.php, which replaces the reload with an in-place reset back to a
+// ready-to-scan state, since reloading there would leave the just-actioned
+// file on screen instead of clearing the way for the next scan.
+window.custodiaCustodyActionComplete = window.custodiaCustodyActionComplete || function (message) {
+  custodiaFlash(message);
+  window.location.reload();
+};
+custodiaWireActionForm(document.getElementById('checkoutForm'), () => custodiaCustodyActionComplete('File issued.'));
+custodiaWireActionForm(document.getElementById('checkinForm'), () => custodiaCustodyActionComplete('File returned.'));
+custodiaWireActionForm(document.getElementById('transferForm'), () => custodiaCustodyActionComplete('Transfer requested.'));
 </script>

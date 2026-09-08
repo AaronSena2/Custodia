@@ -132,8 +132,21 @@ function custodia_can_decide_matter_access(PDO $pdo, array $user, string $matter
     if (!$matter) {
         return false;
     }
+    // Security review 2026-09-03, finding 2.2: the "manage THIS matter"
+    // half of this used to also require role === 'PARTNER' literally, but
+    // the Edit Matter Details "Incharge" field (matter.php) accepts any
+    // active user regardless of role — a custom role like "Senior
+    // Associate" or "Principal Associate" can genuinely be a matter's
+    // managing_partner_id. That left a non-Partner incharge with no floor
+    // at all: they could only decide access requests if separately granted
+    // the firm-wide decide_access_requests permission, which grants that
+    // power over every matter, not just their own. The floor now checks
+    // the data fact (are they THIS matter's incharge?) instead of the role
+    // label; the firm-wide-permission exclusion still applies to literal
+    // Partners only, unchanged from before.
+    $isMatterIncharge = $matter['managing_partner_id'] === $user['id'];
     return (custodia_user_has_permission($pdo, $user, 'decide_access_requests') && $user['role'] !== 'PARTNER')
-        || ($user['role'] === 'PARTNER' && $matter['managing_partner_id'] === $user['id']);
+        || $isMatterIncharge;
 }
 
 /** @param ?int $expiresInHours Only meaningful when $approve is true; null means the grant never expires. */

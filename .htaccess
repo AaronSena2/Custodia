@@ -1,0 +1,18 @@
+# Security review 2026-09-03, finding 1.5: browser security headers.
+#
+# Every *.php request already gets the full header set (including
+# Content-Security-Policy and X-Frame-Options) from
+# includes/security_headers.php, called from custodia_start_session() on
+# every entry point. Static files under assets/ (CSS, JS) are served
+# directly by Apache and never touch PHP, so they never see that — this
+# gives them the two headers that are still meaningful for a file fetched
+# on its own rather than navigated to. Wrapped in <IfModule> so a host
+# without mod_headers loaded just serves the files unheadered instead of
+# 500ing; storage/.htaccess (blocking direct access to uploaded documents)
+# already relies on AllowOverride being enabled for this app, same as here.
+<IfModule mod_headers.c>
+    <FilesMatch "\.(css|js|mjs|svg|png|jpe?g|gif|webp|woff2?|ttf|eot|ico|map)$">
+        Header set X-Content-Type-Options "nosniff"
+        Header set Referrer-Policy "same-origin"
+    </FilesMatch>
+</IfModule>

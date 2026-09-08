@@ -106,7 +106,7 @@ require __DIR__ . '/includes/layout_header.php';
         <tbody>
           <?php foreach ($result['rows'] as $m): ?>
             <tr class="table-clickable-row" onclick="window.location='matter.php?id=<?= e($m['id']) ?>'">
-              <td class="fw-semibold"><?= e($m['matter_number']) ?></td>
+              <td class="fw-semibold"><?= custodia_matter_number_chip($m['matter_number'], $m['confidentiality']) ?></td>
               <td><?= e($m['client_name']) ?></td>
               <td><?= e($m['practice_area']) ?></td>
               <td><?= custodia_status_badge($m['status']) ?> <?= custodia_confidentiality_badge($m['confidentiality']) ?></td>

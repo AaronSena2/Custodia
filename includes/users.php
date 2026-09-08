@@ -76,8 +76,8 @@ function custodia_create_user(PDO $pdo, array $actor, array $fields, string $ipA
     try {
         $id = custodia_uuid();
         $pdo->prepare(
-            'INSERT INTO users (id, employee_id, full_name, email, password_hash, role, bar_number, is_active)
-             VALUES (:id, :eid, :name, :email, :hash, :role, :bar, 1)'
+            'INSERT INTO users (id, employee_id, full_name, email, password_hash, role, bar_number, is_active, must_reset_password)
+             VALUES (:id, :eid, :name, :email, :hash, :role, :bar, 1, 1)'
         )->execute([
             'id' => $id, 'eid' => $employeeId, 'name' => $fullName, 'email' => $email,
             'hash' => password_hash($password, PASSWORD_DEFAULT), 'role' => $role,
@@ -222,7 +222,14 @@ function custodia_reactivate_user(PDO $pdo, array $actor, string $userId, string
     }
 }
 
-function custodia_reset_user_password(PDO $pdo, array $actor, string $userId, string $newPassword, string $ipAddress): array
+/**
+ * @param bool $forceReset Whether the account must set its own password on
+ *                          next sign-in (security review 2026-09-03, finding
+ *                          1.1) — true by default, since an admin-set
+ *                          password is by definition known to someone other
+ *                          than the account owner until they change it.
+ */
+function custodia_reset_user_password(PDO $pdo, array $actor, string $userId, string $newPassword, string $ipAddress, bool $forceReset = true): array
 {
     custodia_assert_manage_users_permission($pdo, $actor);
 
@@ -237,8 +244,17 @@ function custodia_reset_user_password(PDO $pdo, array $actor, string $userId, st
 
     $pdo->beginTransaction();
     try {
-        $pdo->prepare('UPDATE users SET password_hash = :hash WHERE id = :id')
-            ->execute(['hash' => password_hash($newPassword, PASSWORD_DEFAULT), 'id' => $userId]);
+        // Also lifts any active lockout (security review 2026-09-03, finding
+        // 1.6) — a fresh admin-issued password is the standard way to
+        // unlock an account without waiting out the lockout timer.
+        $pdo->prepare(
+            'UPDATE users SET password_hash = :hash, must_reset_password = :force,
+                failed_login_attempts = 0, locked_until = NULL WHERE id = :id'
+        )->execute([
+                'hash' => password_hash($newPassword, PASSWORD_DEFAULT),
+                'force' => $forceReset ? 1 : 0,
+                'id' => $userId,
+            ]);
         custodia_audit_record($pdo, [
             'actorId' => $actor['id'], 'actionType' => 'USER_PASSWORD_RESET', 'entityType' => 'USER', 'entityId' => $userId,
             'ipAddress' => $ipAddress,

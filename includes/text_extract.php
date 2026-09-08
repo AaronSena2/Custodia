@@ -9,11 +9,14 @@
  * custodia_ocr_image_text() below) if it's installed — the one place this
  * module isn't dependency-free, because no dependency-free OCR exists.
  *
- * Scanned/image-only PDFs are still NOT OCR'd — that would require
- * rasterizing each page to an image first (Ghostscript or poppler, neither
- * of which this deployment has), which is a materially bigger dependency
- * than "OCR this image file directly." They're flagged 'FAILED' with no
- * text, same as before, rather than silently guessed at.
+ * Scanned/image-only PDFs are NOT OCR'd here, inline — that would mean
+ * rasterizing every page to an image before Tesseract can even look at it,
+ * which for a multi-page scan is easily tens of seconds to minutes, with no
+ * business blocking an upload HTTP request. They're flagged 'NO_TEXT_LAYER'
+ * (see below) instead, and jobs/ocr_scanned_pdfs.php sweeps those on a
+ * schedule using custodia_ghostscript_binary()/custodia_ocr_scanned_pdf_text()
+ * further down this file — see that job's own header comment for why it's a
+ * background sweep rather than part of the upload path.
  *
  * Honest about its other limits: DOCX extraction is reliable (a .docx is
  * just a zip of XML, parsed structurally). PDF extraction is best-effort —
@@ -31,7 +34,20 @@ const CUSTODIA_SUPPORTED_EXTRACTION_EXTENSIONS = [
 ];
 
 /**
- * @return array{status: string, text: ?string} status is DONE, UNSUPPORTED, or FAILED.
+ * File types where "parsed fine but found zero text" almost always means
+ * "this is scanned/image content with no text layer" rather than "this file
+ * is broken" — a PDF with no Tj/TJ operators, or an image Tesseract couldn't
+ * (or wasn't available to) read. Text-native types (txt/md/csv/docx) don't
+ * get this treatment: an empty result there really is just an empty/corrupt
+ * file, not a scanning gap.
+ */
+const CUSTODIA_SCANNABLE_EXTRACTION_EXTENSIONS = [
+    'pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tif', 'tiff',
+];
+
+/**
+ * @return array{status: string, text: ?string} status is DONE, UNSUPPORTED,
+ *   NO_TEXT_LAYER, or FAILED.
  */
 function custodia_extract_text_for_upload(string $filePath, string $originalName): array
 {
@@ -56,9 +72,17 @@ function custodia_extract_text_for_upload(string $filePath, string $originalName
 
     $text = trim((string) $text);
     if ($text === '') {
-        // Parsed successfully but found no extractable text — most often a
-        // scanned/image-only PDF with no text layer, or an empty file.
-        return ['status' => 'FAILED', 'text' => null];
+        // Security review 2026-09-03, finding 4.4: parsed successfully but
+        // found no extractable text. For a PDF or image this is almost
+        // always a scanned page with no text layer (or OCR wasn't available
+        // to run) — flag it distinctly as NO_TEXT_LAYER so the document
+        // list can tell a genuinely searchable-but-empty file apart from
+        // "this needs OCR", instead of both silently reading the same as
+        // any other extraction failure.
+        return [
+            'status' => in_array($ext, CUSTODIA_SCANNABLE_EXTRACTION_EXTENSIONS, true) ? 'NO_TEXT_LAYER' : 'FAILED',
+            'text' => null,
+        ];
     }
 
     if (function_exists('mb_strlen') && mb_strlen($text) > CUSTODIA_EXTRACT_MAX_CHARS) {
@@ -276,4 +300,111 @@ function custodia_ocr_image_text(string $filePath): string
         unlink($txtPath);
     }
     return trim($text);
+}
+
+// ─── Scanned/image-only PDF OCR (background-job only) ───────────────────
+// See jobs/ocr_scanned_pdfs.php — this is deliberately never called from
+// custodia_extract_text_for_upload()/the upload request path (see this
+// file's top docblock for why).
+
+// Default install location for Ghostscript's official Windows installer
+// (https://ghostscript.com/releases/gsdnld.html). Unlike Tesseract's fixed
+// install path, Ghostscript's folder name is versioned (e.g. "gs10.05.1"),
+// so this is a glob rather than a single constant path.
+const CUSTODIA_GHOSTSCRIPT_DEFAULT_GLOB_64 = 'C:\\Program Files\\gs\\gs*\\bin\\gswin64c.exe';
+const CUSTODIA_GHOSTSCRIPT_DEFAULT_GLOB_32 = 'C:\\Program Files (x86)\\gs\\gs*\\bin\\gswin32c.exe';
+
+// Guardrail so one huge scanned file can't tie up a single job run
+// indefinitely — pages beyond this are simply never rasterized/OCR'd. The
+// version stays NO_TEXT_LAYER rather than DONE if nothing under the cap
+// produced text, so a document with, say, 60 scanned pages at least gets
+// its first 40 pages' worth of search coverage rather than none.
+const CUSTODIA_OCR_PDF_MAX_PAGES = 40;
+
+function custodia_ghostscript_binary(): ?string
+{
+    static $resolved = null;
+    if ($resolved !== null) {
+        return $resolved === '' ? null : $resolved;
+    }
+
+    foreach ([CUSTODIA_GHOSTSCRIPT_DEFAULT_GLOB_64, CUSTODIA_GHOSTSCRIPT_DEFAULT_GLOB_32] as $pattern) {
+        $matches = glob($pattern) ?: [];
+        if (!empty($matches)) {
+            // If more than one version is installed, the highest version
+            // string sorts last — good enough without a real semver parse.
+            sort($matches, SORT_STRING);
+            $resolved = end($matches);
+            return $resolved;
+        }
+    }
+
+    if (function_exists('exec')) {
+        $candidates = str_starts_with(PHP_OS, 'WIN')
+            ? ['where gswin64c', 'where gswin32c']
+            : ['command -v gs'];
+        foreach ($candidates as $lookupCmd) {
+            $out = [];
+            exec($lookupCmd . ' 2>&1', $out, $code);
+            if ($code === 0 && !empty($out[0])) {
+                $resolved = trim($out[0]);
+                return $resolved;
+            }
+        }
+    }
+
+    $resolved = '';
+    return null;
+}
+
+/**
+ * Rasterizes each page of a scanned/image-only PDF to a PNG via Ghostscript
+ * (up to CUSTODIA_OCR_PDF_MAX_PAGES pages), then runs the existing Tesseract
+ * wrapper (custodia_ocr_image_text()) against each page image in order and
+ * joins the results with a blank line between pages. Returns '' if
+ * Ghostscript or Tesseract isn't installed, or the PDF genuinely has no
+ * recognizable text on any processed page — callers treat that exactly like
+ * any other empty extraction result (the version stays/returns NO_TEXT_LAYER,
+ * never a hard error). $filePath is always a server-generated storage path,
+ * never a user-supplied name, same safety note as custodia_ocr_image_text().
+ */
+function custodia_ocr_scanned_pdf_text(string $filePath): string
+{
+    $gs = custodia_ghostscript_binary();
+    if ($gs === null || custodia_tesseract_binary() === null || !function_exists('exec')) {
+        return '';
+    }
+
+    $workDir = rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'custodia_ocr_' . bin2hex(random_bytes(8));
+    if (!@mkdir($workDir, 0700, true) && !is_dir($workDir)) {
+        return '';
+    }
+
+    try {
+        $outputPattern = $workDir . DIRECTORY_SEPARATOR . 'page-%03d.png';
+        $cmd = escapeshellarg($gs)
+            . ' -q -dNOPAUSE -dBATCH -dSAFER'
+            . ' -sDEVICE=png16m -r300'
+            . ' -dFirstPage=1 -dLastPage=' . CUSTODIA_OCR_PDF_MAX_PAGES
+            . ' -sOutputFile=' . escapeshellarg($outputPattern)
+            . ' ' . escapeshellarg($filePath) . ' 2>&1';
+        exec($cmd, $unused, $exitCode);
+
+        $pages = glob($workDir . DIRECTORY_SEPARATOR . 'page-*.png') ?: [];
+        sort($pages, SORT_STRING); // page-001, page-002, ... — preserves document order
+
+        $pageTexts = [];
+        foreach ($pages as $pagePath) {
+            $pageText = custodia_ocr_image_text($pagePath);
+            if ($pageText !== '') {
+                $pageTexts[] = $pageText;
+            }
+        }
+        return trim(implode("\n\n", $pageTexts));
+    } finally {
+        foreach (glob($workDir . DIRECTORY_SEPARATOR . '*') ?: [] as $leftover) {
+            @unlink($leftover);
+        }
+        @rmdir($workDir);
+    }
 }

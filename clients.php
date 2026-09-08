@@ -3,6 +3,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/helpers.php';
 require_once __DIR__ . '/includes/clients.php';
+require_once __DIR__ . '/includes/practice_groups.php';
 require_once __DIR__ . '/includes/listing.php';
 
 $user = custodia_require_login();
@@ -10,6 +11,19 @@ $pdo = custodia_db();
 
 $allClients = custodia_list_clients($pdo, $user);
 $canCreate = custodia_user_has_permission($pdo, $user, 'create_clients');
+$canCreateMatters = custodia_user_has_permission($pdo, $user, 'create_matters');
+
+// For the "New Client" modal's optional "Also add a matter" section — same
+// pickers matters.php's own "New Matter" modal loads.
+$partners = [];
+$practiceAreasForPicker = [];
+if ($canCreate && $canCreateMatters) {
+    $pStmt = $pdo->prepare("SELECT id, full_name FROM users WHERE role = 'PARTNER' AND is_active = 1 ORDER BY full_name");
+    $pStmt->execute();
+    $partners = $pStmt->fetchAll();
+
+    $practiceAreasForPicker = custodia_list_practice_groups($pdo);
+}
 
 $filters = ['is_active' => $_GET['status'] ?? ''];
 $search = trim($_GET['q'] ?? '');
@@ -101,6 +115,53 @@ require __DIR__ . '/includes/layout_header.php';
             <label class="form-label">Address <span class="text-muted small">(optional)</span></label>
             <textarea class="form-control" name="address"></textarea>
           </div>
+
+          <?php if ($canCreateMatters): ?>
+          <hr>
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="addMatter" value="1" id="newClientAddMatter">
+            <label class="form-check-label" for="newClientAddMatter">Also add a matter for this client</label>
+          </div>
+          <div id="newClientMatterFields" class="d-none">
+            <?php if (empty($partners)): ?>
+              <div class="form-text text-danger mb-2">No active partners yet — a matter needs one as Incharge.</div>
+            <?php endif; ?>
+            <?php if (empty($practiceAreasForPicker)): ?>
+              <div class="form-text text-danger mb-2">No practice areas yet — an admin can add one from Admin → Practice Areas.</div>
+            <?php endif; ?>
+            <div class="mb-3">
+              <label class="form-label">Matter Number</label>
+              <input class="form-control" name="matterNumber" placeholder="M-2026-0001" autocomplete="off">
+              <div id="newClientMatterNumberWarning" class="form-text text-danger d-none">A matter with that number already exists.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Practice Area</label>
+              <select class="form-select" name="practiceArea">
+                <option value="">— Select a practice area —</option>
+                <?php foreach ($practiceAreasForPicker as $pa): ?>
+                  <option value="<?= e($pa['name']) ?>"><?= e($pa['name']) ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Incharge</label>
+              <select class="form-select" name="managingPartnerId">
+                <option value="">— Select a partner —</option>
+                <?php foreach ($partners as $p): ?>
+                  <option value="<?= e($p['id']) ?>" <?= $p['id'] === $user['id'] ? 'selected' : '' ?>><?= e($p['full_name']) ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Confidentiality</label>
+              <select class="form-select" name="confidentiality">
+                <option value="STANDARD">Standard</option>
+                <option value="RESTRICTED">Restricted</option>
+                <option value="PRIVILEGED">Privileged</option>
+              </select>
+            </div>
+          </div>
+          <?php endif; ?>
         </div>
         <div class="modal-footer">
           <button type="submit" class="btn btn-primary w-100">Create Client</button>
@@ -111,8 +172,57 @@ require __DIR__ . '/includes/layout_header.php';
 </div>
 <script>
 custodiaWireActionForm(document.getElementById('createClientForm'), (data) => {
-  window.location = 'client.php?id=' + encodeURIComponent(data.id);
+  window.location = data.matterId
+    ? 'matter.php?id=' + encodeURIComponent(data.matterId)
+    : 'client.php?id=' + encodeURIComponent(data.id);
 });
+
+<?php if ($canCreateMatters): ?>
+(function () {
+  const form = document.getElementById('createClientForm');
+  const checkbox = document.getElementById('newClientAddMatter');
+  const fieldsBox = document.getElementById('newClientMatterFields');
+  const matterNumberInput = form.querySelector('[name="matterNumber"]');
+  const practiceAreaSelect = form.querySelector('[name="practiceArea"]');
+  const managingPartnerSelect = form.querySelector('[name="managingPartnerId"]');
+  const dupeWarning = document.getElementById('newClientMatterNumberWarning');
+
+  function toggleMatterFields() {
+    const on = checkbox.checked;
+    fieldsBox.classList.toggle('d-none', !on);
+    matterNumberInput.required = on;
+    practiceAreaSelect.required = on;
+    managingPartnerSelect.required = on;
+    if (!on) {
+      dupeWarning.classList.add('d-none');
+      matterNumberInput.classList.remove('is-invalid');
+    }
+  }
+  checkbox.addEventListener('change', toggleMatterFields);
+
+  // Instant duplicate-matter-number check, debounced so it fires once
+  // typing pauses rather than on every keystroke.
+  let debounceTimer = null;
+  matterNumberInput.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    dupeWarning.classList.add('d-none');
+    matterNumberInput.classList.remove('is-invalid');
+    const value = matterNumberInput.value.trim();
+    if (!value) return;
+    debounceTimer = setTimeout(async () => {
+      try {
+        const data = await custodiaGet('actions/check_matter_number.php?matterNumber=' + encodeURIComponent(value));
+        if (data.exists) {
+          dupeWarning.classList.remove('d-none');
+          matterNumberInput.classList.add('is-invalid');
+        }
+      } catch (err) {
+        // Silently ignore — the server re-checks on submit either way.
+      }
+    }, 400);
+  });
+})();
+<?php endif; ?>
 </script>
 
 <div class="modal fade" id="bulkImportClientsModal" tabindex="-1">

@@ -10,9 +10,16 @@
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/practice_groups.php';
+require_once __DIR__ . '/audit.php';
+require_once __DIR__ . '/security_headers.php';
 
 function custodia_start_session(): void
 {
+    // Security review 2026-09-03, finding 1.5: this is the one chokepoint
+    // every PHP entry point in the app passes through before any output —
+    // see includes/security_headers.php's own comment for the full map.
+    custodia_send_security_headers();
+
     if (session_status() === PHP_SESSION_NONE) {
         session_name(custodia_config()['session_name']);
         session_start();
@@ -34,6 +41,24 @@ function custodia_current_user(): ?array
         return null;
     }
 
+    // Idle-session lockout — security review 2026-09-03, finding 1.6: a
+    // signed-in session left unattended (shared workstation, unlocked
+    // screen) stayed valid indefinitely. Any session with no recorded
+    // activity for longer than the configured idle window is treated as
+    // logged out; custodia_require_login() then bounces to login.php,
+    // which shows the 'login_notice' left behind here.
+    $idleLimitSeconds = custodia_config()['security']['idle_timeout_minutes'] * 60;
+    $lastActivity = $_SESSION['last_activity'] ?? null;
+    if ($lastActivity !== null && (time() - (int) $lastActivity) > $idleLimitSeconds) {
+        $_SESSION = [];
+        session_destroy();
+        custodia_start_session();
+        session_regenerate_id(true);
+        $_SESSION['login_notice'] = 'You were signed out after a period of inactivity. Please sign in again.';
+        return null;
+    }
+    $_SESSION['last_activity'] = time();
+
     $stmt = custodia_db()->prepare('SELECT * FROM users WHERE id = :id AND is_active = 1');
     $stmt->execute(['id' => $_SESSION['user_id']]);
     $row = $stmt->fetch();
@@ -47,23 +72,103 @@ function custodia_current_user(): ?array
     return $cached;
 }
 
-/** Attempts login; returns the user row on success, or null on bad credentials/inactive account. */
+/**
+ * Attempts login; returns the user row on success, or null on bad
+ * credentials/inactive/locked account.
+ *
+ * Account lockout — security review 2026-09-03, finding 1.6: with a
+ * previously-published shared admin password (finding 1.1) and no
+ * throttling, credential attacks against this form were free.
+ * custodia_config()['security'] controls the failure threshold and
+ * lockout duration. A locked account fails closed here (password is never
+ * even checked) so the lock can't be raced by a fast guesser; the login
+ * page uses custodia_account_lock_remaining_minutes() separately to show
+ * a distinct "temporarily locked" message.
+ */
 function custodia_attempt_login(string $email, string $password): ?array
 {
-    $stmt = custodia_db()->prepare('SELECT * FROM users WHERE email = :email');
+    $pdo = custodia_db();
+    $stmt = $pdo->prepare('SELECT * FROM users WHERE email = :email');
     $stmt->execute(['email' => $email]);
     $row = $stmt->fetch();
 
-    if (!$row || !$row['is_active'] || !$row['password_hash'] || !password_verify($password, $row['password_hash'])) {
+    if (!$row) {
         return null;
+    }
+
+    if ($row['locked_until'] !== null && strtotime($row['locked_until']) > time()) {
+        return null;
+    }
+
+    if (!$row['is_active'] || !$row['password_hash'] || !password_verify($password, $row['password_hash'])) {
+        if ($row['is_active'] && $row['password_hash']) {
+            custodia_register_failed_login($pdo, $row);
+        }
+        return null;
+    }
+
+    if ((int) $row['failed_login_attempts'] > 0 || $row['locked_until'] !== null) {
+        $pdo->prepare('UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = :id')
+            ->execute(['id' => $row['id']]);
     }
 
     custodia_start_session();
     session_regenerate_id(true); // fresh session id on every login — mitigates session fixation
     $_SESSION['user_id'] = $row['id'];
+    $_SESSION['last_activity'] = time();
 
     unset($row['password_hash']);
     return $row;
+}
+
+/** Increments a user's failed-login counter and locks the account once the configured threshold is hit. */
+function custodia_register_failed_login(PDO $pdo, array $row): void
+{
+    $security = custodia_config()['security'];
+    $attempts = (int) $row['failed_login_attempts'] + 1;
+    $lockedUntil = null;
+    if ($attempts >= $security['max_failed_logins']) {
+        $lockedUntil = (new DateTimeImmutable('now'))
+            ->modify('+' . $security['lockout_minutes'] . ' minutes')
+            ->format('Y-m-d H:i:s.u');
+        $attempts = 0; // counter resets — a fresh window starts once the lock expires
+    }
+    $pdo->prepare('UPDATE users SET failed_login_attempts = :attempts, locked_until = :locked WHERE id = :id')
+        ->execute(['attempts' => $attempts, 'locked' => $lockedUntil, 'id' => $row['id']]);
+
+    if ($lockedUntil === null) {
+        return;
+    }
+
+    $pdo->beginTransaction();
+    try {
+        custodia_audit_record($pdo, [
+            'actorId' => $row['id'], 'actionType' => 'ACCOUNT_LOCKED', 'entityType' => 'USER', 'entityId' => $row['id'],
+            'ipAddress' => custodia_client_ip(),
+            'reason' => "Locked after {$security['max_failed_logins']} consecutive failed sign-in attempts.",
+        ]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+    }
+}
+
+/**
+ * Minutes remaining on an active lockout for this email, or null if the
+ * account isn't currently locked (including when no account exists at all
+ * — same as an unlocked account, so this never reveals whether an email is
+ * registered on its own; only an actually-locked account is distinguishable).
+ */
+function custodia_account_lock_remaining_minutes(PDO $pdo, string $email): ?int
+{
+    $stmt = $pdo->prepare('SELECT locked_until FROM users WHERE email = :email');
+    $stmt->execute(['email' => $email]);
+    $lockedUntil = $stmt->fetchColumn();
+    if (!$lockedUntil) {
+        return null;
+    }
+    $remainingSeconds = strtotime((string) $lockedUntil) - time();
+    return $remainingSeconds > 0 ? (int) ceil($remainingSeconds / 60) : null;
 }
 
 function custodia_logout(): void
@@ -88,6 +193,20 @@ function custodia_require_login(): array
         header('Location: login.php');
         exit;
     }
+
+    // Security review 2026-09-03, finding 1.1: an admin-issued or rotated
+    // password (custodia_create_user()/custodia_reset_user_password() in
+    // includes/users.php) sets must_reset_password — every page except the
+    // reset form itself and sign-out bounces here until the user sets a
+    // password only they know.
+    if (!empty($user['must_reset_password'])) {
+        $currentScript = basename((string) ($_SERVER['SCRIPT_NAME'] ?? ''));
+        if (!in_array($currentScript, ['change_password.php', 'logout.php'], true)) {
+            header('Location: change_password.php');
+            exit;
+        }
+    }
+
     return $user;
 }
 

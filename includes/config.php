@@ -39,9 +39,25 @@ if (!function_exists('custodia_config')) {
                 // Local filesystem path used to store uploaded document versions —
                 // the same stand-in-for-S3 approach the earlier Node version used.
                 'storage_path' => custodia_env('CUSTODIA_STORAGE_PATH', __DIR__ . '/../storage'),
+                // Server-side cache for expensive, RBAC-scoped read paths (currently
+                // just dashboard analytics — see custodia_dashboard_analytics_cached()
+                // in includes/analytics.php). Defaults under storage/ so it's covered
+                // by the same .gitignore rule and the same filesystem permissions as
+                // uploaded documents, without being mistaken for one (matter ids are
+                // UUIDs, never ".cache").
+                'cache_path' => custodia_env('CUSTODIA_CACHE_PATH', __DIR__ . '/../storage/.cache'),
                 'session_name' => 'custodia_session',
                 // Demo-account password shown in the README/seed output.
                 'demo_password' => 'ChangeMe123!',
+                // Account lockout + idle-session timeout — security review
+                // 2026-09-03, finding 1.6: no throttling meant credential
+                // attacks against login.php were free, and a signed-in
+                // session on an unattended workstation stayed valid forever.
+                'security' => [
+                    'max_failed_logins' => (int) custodia_env('CUSTODIA_MAX_FAILED_LOGINS', '5'),
+                    'lockout_minutes' => (int) custodia_env('CUSTODIA_LOCKOUT_MINUTES', '15'),
+                    'idle_timeout_minutes' => (int) custodia_env('CUSTODIA_IDLE_TIMEOUT_MINUTES', '20'),
+                ],
             ];
         }
         return $config;

@@ -12,7 +12,6 @@ require_once __DIR__ . '/includes/audit_query.php';
 require_once __DIR__ . '/includes/listing.php';
 
 $user = custodia_require_login();
-custodia_require_role($user, ['SYSTEM_ADMIN', 'RECORDS_MANAGER']);
 $pdo = custodia_db();
 
 // manage_users gates both the User Accounts tab and this Permissions tab —
@@ -21,21 +20,90 @@ $canManageUsers = custodia_user_has_permission($pdo, $user, 'manage_users');
 $canManagePracticeGroups = custodia_user_has_permission($pdo, $user, 'manage_practice_groups');
 $canManageLocations = custodia_user_has_permission($pdo, $user, 'manage_physical_locations');
 $canViewAudit = custodia_user_has_permission($pdo, $user, 'view_audit_log');
+$canManageRetention = custodia_user_has_permission($pdo, $user, 'manage_retention_policies');
+
+// Security review 2026-09-03, finding 2.2: this used to be a hardcoded
+// custodia_require_role($user, ['SYSTEM_ADMIN', 'RECORDS_MANAGER']) gate on
+// the whole page, left over from before Admin -> Permissions made roles and
+// their capabilities admin-configurable. That silently made every
+// admin-area entry in the matrix (manage_users, manage_retention_policies,
+// manage_practice_groups, manage_physical_locations, view_audit_log,
+// export_audit_log, verify_audit_chain) dead weight for any role beyond the
+// original six built-ins: an admin could check the box granting, say, a
+// custom "Legal Clerk" or "Front Desk" role manage_retention_policies, but
+// that role would still 403 on admin.php itself before ever reaching the
+// tab the permission was meant to unlock — the matrix entry looked live
+// but did nothing. The gate is now permission-based: any role holding at
+// least one admin-area permission can reach the page; each tab below still
+// requires its own specific permission exactly as before (unchanged
+// behavior for SYSTEM_ADMIN/RECORDS_MANAGER, whose defaults already grant
+// several of these).
+$hasAnyAdminAreaPermission = $canManageUsers || $canManagePracticeGroups
+    || $canManageLocations || $canViewAudit || $canManageRetention
+    || custodia_user_has_permission($pdo, $user, 'export_audit_log')
+    || custodia_user_has_permission($pdo, $user, 'verify_audit_chain');
+if (!$hasAnyAdminAreaPermission) {
+    http_response_code(403);
+    require __DIR__ . '/403.php';
+    exit;
+}
+
 $tab = $_GET['tab'] ?? 'retention';
+// Security review 2026-09-03, finding 2.4: each tab beyond the base
+// admin-area gate above requires its own finer-grained permission — a
+// Records Manager, for instance, has manage_retention_policies by default
+// but not manage_users or view_audit_log (see
+// CUSTODIA_DEFAULT_ROLE_PERMISSIONS in includes/permissions.php). The tab
+// links themselves are already hidden without the permission, but a
+// hand-typed admin.php?tab=... URL must be rejected server-side too — with
+// an actual 403, not a silent redirect to a tab the user IS allowed to
+// see, so this is a real, testable control rather than something that
+// just happens to look right in the nav.
 if (($tab === 'users' || $tab === 'permissions') && !$canManageUsers) {
-    $tab = 'retention'; // the tab links themselves are hidden without the permission; this guards a hand-typed URL too
+    http_response_code(403);
+    require __DIR__ . '/403.php';
+    exit;
 }
 if ($tab === 'practicegroups' && !$canManagePracticeGroups) {
-    $tab = 'retention';
+    http_response_code(403);
+    require __DIR__ . '/403.php';
+    exit;
 }
 if ($tab === 'locations' && !$canManageLocations) {
-    $tab = 'retention';
+    http_response_code(403);
+    require __DIR__ . '/403.php';
+    exit;
 }
 if ($tab === 'audit' && !$canViewAudit) {
-    $tab = 'retention';
+    http_response_code(403);
+    require __DIR__ . '/403.php';
+    exit;
+}
+// Security review 2026-09-03, finding 2.2: the retention tab — also the
+// catch-all default for any unrecognized ?tab= value, per the final else
+// branch further down in this file's tab-rendering chain — had no
+// explicit permission check of its own; it was implicitly gated only by
+// the page-level role check just removed above. Give it the same
+// explicit, testable 403 the other four tabs already have.
+if (!in_array($tab, ['users', 'permissions', 'practicegroups', 'locations', 'audit'], true) && !$canManageRetention) {
+    http_response_code(403);
+    require __DIR__ . '/403.php';
+    exit;
 }
 
 $policies = custodia_list_retention_policies($pdo);
+// Security review 2026-09-03, finding 2.1: only 2 of 14 real practice
+// groups had a retention policy, so the compliance workflow silently
+// never triggered for the rest. The retention tab now surfaces the
+// firm-wide default and exactly which practice groups still have no
+// policy of their own, per the recommendation to "audit this list
+// whenever a new practice group is added."
+$retentionPoliciesDisplay = array_values(array_filter(
+    $policies,
+    static fn(array $p): bool => $p['practice_area'] !== CUSTODIA_RETENTION_DEFAULT_PRACTICE_AREA
+));
+$retentionDefault = custodia_retention_default_policy($pdo);
+$retentionUncoveredGroups = custodia_retention_uncovered_practice_groups($pdo);
 $allRoles = ($tab === 'users' || $tab === 'permissions') ? custodia_list_roles($pdo) : [];
 $permissionMatrix = $tab === 'permissions' ? custodia_list_role_permissions($pdo) : [];
 $practiceGroups = $tab === 'practicegroups' ? custodia_list_practice_groups($pdo) : [];
@@ -689,7 +757,7 @@ require __DIR__ . '/includes/layout_header.php';
       <?php endif; ?>
     </div>
   </div>
-  <p class="text-muted small mb-3">Immutable, hash-chained record of every access and movement.</p>
+  <p class="text-muted small mb-3">Immutable record of every access and movement. Custody/security-relevant actions are hash-chained end-to-end; routine VIEW entries are logged but excluded from the chain to keep high-volume browsing from serializing every writer (Verify Chain Integrity checks the chained subset).</p>
 
   <div id="verifyResult" class="alert d-none mb-3"></div>
 
@@ -786,14 +854,60 @@ require __DIR__ . '/includes/layout_header.php';
     <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createPolicyModal">+ New Policy</button>
   </div>
 
+  <!--
+    Security review 2026-09-03, finding 2.1: only 2 of 14 real practice
+    groups had a retention policy, so the retention/disposition workflow
+    silently never triggered for the other 12. This card makes the
+    firm-wide default (jobs/overdue_sweep.php's fallback for any practice
+    group without its own policy) explicit and editable, and states
+    plainly how many groups currently have no policy of their own at all.
+  -->
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <h2 class="h6 mb-1">Firm-wide default policy</h2>
+          <?php if ($retentionDefault): ?>
+            <p class="mb-0 text-muted">
+              Applies to any practice group with no policy of its own:
+              <strong><?= (int) $retentionDefault['retention_years'] ?> years</strong>,
+              then <span class="badge text-bg-light border"><?= e($retentionDefault['action']) ?></span>.
+            </p>
+          <?php else: ?>
+            <p class="mb-0 text-danger">
+              No firm-wide default is set. A practice group with no policy of its own is
+              completely uncovered by the retention/disposition workflow — closed matters in
+              it will never be flagged for review, archive, or destruction.
+            </p>
+          <?php endif; ?>
+        </div>
+        <button type="button" class="btn btn-outline-primary btn-sm flex-shrink-0 ms-3"
+                data-bs-toggle="modal" data-bs-target="#defaultPolicyModal">
+          <?= $retentionDefault ? 'Edit default' : 'Set firm-wide default' ?>
+        </button>
+      </div>
+      <?php if (!empty($retentionUncoveredGroups)): ?>
+        <hr>
+        <p class="mb-1 small fw-semibold">
+          <?= count($retentionUncoveredGroups) ?> practice group<?= count($retentionUncoveredGroups) === 1 ? '' : 's' ?>
+          <?= $retentionDefault ? 'relying entirely on the default above (no policy of their own):' : 'with no retention policy at all:' ?>
+        </p>
+        <p class="mb-0 small text-muted"><?= e(implode(', ', $retentionUncoveredGroups)) ?></p>
+      <?php elseif ($retentionDefault): ?>
+        <hr>
+        <p class="mb-0 small text-success">Every practice group has a policy — a specific one, or the default above.</p>
+      <?php endif; ?>
+    </div>
+  </div>
+
   <div class="card">
-    <?php if (empty($policies)): ?>
-      <div class="text-center text-muted py-5">No retention policies configured yet.</div>
+    <?php if (empty($retentionPoliciesDisplay)): ?>
+      <div class="text-center text-muted py-5">No practice-group-specific retention policies configured yet.</div>
     <?php else: ?>
       <table class="table mb-0 align-middle">
         <thead class="table-light"><tr><th>Practice Group</th><th>Retention Years</th><th>Action</th><th>Trigger Event</th></tr></thead>
         <tbody>
-          <?php foreach ($policies as $p): ?>
+          <?php foreach ($retentionPoliciesDisplay as $p): ?>
             <tr>
               <td class="fw-semibold"><?= e($p['practice_area']) ?></td>
               <td><?= (int) $p['retention_years'] ?></td>
@@ -838,6 +952,34 @@ require __DIR__ . '/includes/layout_header.php';
   </div></div></div>
   <script>
   custodiaWireActionForm(document.getElementById('createPolicyForm'), () => window.location.reload());
+  </script>
+
+  <div class="modal fade" id="defaultPolicyModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title">Firm-wide default retention policy</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <form id="defaultPolicyForm" data-action-url="actions/set_default_retention_policy.php">
+      <div class="modal-body">
+        <div class="form-error alert alert-danger d-none"></div>
+        <p class="text-muted small">
+          Applies automatically to any practice group with no policy of its own — including
+          ones added later. Trigger is always matter close, same as every other policy.
+        </p>
+        <div class="mb-3"><label class="form-label">Retention Years</label>
+          <input type="number" min="1" class="form-control" name="retentionYears" required
+                 value="<?= $retentionDefault ? (int) $retentionDefault['retention_years'] : 7 ?>">
+        </div>
+        <div class="mb-3"><label class="form-label">Action</label>
+          <select class="form-select" name="action">
+            <?php foreach (['REVIEW' => 'Review', 'ARCHIVE' => 'Archive', 'DESTROY' => 'Destroy'] as $val => $label): ?>
+              <option value="<?= $val ?>" <?= ($retentionDefault && $retentionDefault['action'] === $val) ? 'selected' : '' ?>><?= $label ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer"><button type="submit" class="btn btn-primary w-100"><?= $retentionDefault ? 'Save default' : 'Set default' ?></button></div>
+    </form>
+  </div></div></div>
+  <script>
+  custodiaWireActionForm(document.getElementById('defaultPolicyForm'), () => window.location.reload());
   </script>
 
 <?php endif; ?>

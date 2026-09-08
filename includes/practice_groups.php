@@ -314,3 +314,62 @@ function custodia_user_has_group_matter_access(PDO $pdo, string $userId, string 
     $stmt->execute(['mid' => $matterId, 'uid' => $userId]);
     return (bool) $stmt->fetch();
 }
+
+// ── Standing "sees every matter" group ──────────────────────────────
+
+/**
+ * Name of the practice group that automatically gets access to every new
+ * matter, per explicit firm decision (2026-09-06): "Registry" is the
+ * records/registry staff group, not a legal practice team, and they need
+ * visibility into every matter regardless of practice area. Matched by
+ * exact name against practice_groups.name.
+ */
+const CUSTODIA_AUTO_GRANT_MATTER_GROUP_NAME = 'Registry';
+
+/**
+ * Grants CUSTODIA_AUTO_GRANT_MATTER_GROUP_NAME automatic access to a
+ * just-created matter. Called from custodia_create_matter() inside that
+ * function's own transaction, so the matter row and this grant either both
+ * land or both roll back together.
+ *
+ * Deliberately bypasses the manage_practice_groups permission check that
+ * custodia_grant_group_matter_access() enforces — this isn't a
+ * user-initiated grant, it's standing firm policy applied automatically on
+ * every matter opening, so any user who can create a matter can trigger it.
+ * The audit entry still attributes it to the matter's creator.
+ *
+ * Silently does nothing if no group named "Registry" exists in this
+ * environment (renamed, deleted, or a firm that opts out of this default)
+ * or if the grant already exists — both are fine, not errors.
+ */
+function custodia_auto_grant_registry_group_access(PDO $pdo, array $user, string $matterId, string $ipAddress): void
+{
+    $groupStmt = $pdo->prepare('SELECT id, name FROM practice_groups WHERE name = :name');
+    $groupStmt->execute(['name' => CUSTODIA_AUTO_GRANT_MATTER_GROUP_NAME]);
+    $group = $groupStmt->fetch();
+    if (!$group) {
+        return;
+    }
+
+    $dupe = $pdo->prepare('SELECT id FROM practice_group_matter_grants WHERE practice_group_id = :gid AND matter_id = :mid');
+    $dupe->execute(['gid' => $group['id'], 'mid' => $matterId]);
+    if ($dupe->fetch()) {
+        return;
+    }
+
+    $grantId = custodia_uuid();
+    $reason = 'Automatic: the "Registry" group is granted access to every new matter by default.';
+    $pdo->prepare('INSERT INTO practice_group_matter_grants (id, practice_group_id, matter_id, granted_by_id, reason) VALUES (:id, :gid, :mid, :by, :reason)')
+        ->execute(['id' => $grantId, 'gid' => $group['id'], 'mid' => $matterId, 'by' => $user['id'], 'reason' => $reason]);
+
+    custodia_audit_record($pdo, [
+        'actorId' => $user['id'], 'actionType' => 'PRACTICE_GROUP_MATTER_ACCESS_GRANTED', 'entityType' => 'MATTER', 'entityId' => $matterId,
+        'reason' => $reason, 'ipAddress' => $ipAddress, 'metadata' => ['practiceGroupId' => $group['id'], 'auto' => true],
+    ]);
+
+    $memberIds = array_column(custodia_list_group_members($pdo, $group['id']), 'user_id');
+    custodia_notify_users(
+        $pdo, $memberIds, 'GROUP_MATTER_ACCESS_GRANTED',
+        "Your \"{$group['name']}\" group was granted access: a new matter was opened", null, 'MATTER', $matterId
+    );
+}

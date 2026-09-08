@@ -27,6 +27,81 @@ function custodiaToggleTheme() {
   try { localStorage.setItem('custodia-theme', next); } catch (e) {}
 }
 
+/**
+ * Same "apply saved preference before first paint" trick as the theme IIFE
+ * above — sets data-notif-sound="muted" on <html> immediately so the bell
+ * dropdown's speaker icon (see assets/css/app.css) never flashes the wrong
+ * state.
+ */
+(function () {
+  try {
+    if (localStorage.getItem('custodia-notification-sound') === 'muted') {
+      document.documentElement.setAttribute('data-notif-sound', 'muted');
+    }
+  } catch (e) {}
+})();
+
+function custodiaNotificationSoundMuted() {
+  return document.documentElement.getAttribute('data-notif-sound') === 'muted';
+}
+
+function custodiaToggleNotificationSound() {
+  const html = document.documentElement;
+  const muting = !custodiaNotificationSoundMuted();
+  if (muting) {
+    html.setAttribute('data-notif-sound', 'muted');
+  } else {
+    html.removeAttribute('data-notif-sound');
+    custodiaWakeAudioContext();
+    custodiaPlayNotificationSound(); // immediate feedback that sound is back on
+  }
+  try { localStorage.setItem('custodia-notification-sound', muting ? 'muted' : 'on'); } catch (e) {}
+}
+
+/**
+ * A short two-note chime, synthesized with the Web Audio API instead of an
+ * mp3/wav asset — no file to ship, no licensing to track down, consistent
+ * with this app's "no external assets, no build step" approach elsewhere
+ * (see the inline nav SVGs in includes/layout_header.php). Used by
+ * custodiaPollNotifications() (includes/layout_header.php) whenever a poll
+ * finds the unread count went up.
+ *
+ * Browsers refuse to start audio before the page has seen a user gesture,
+ * so the AudioContext is created lazily on the page's first click/keydown
+ * (custodiaWakeAudioContext below) rather than at load time; if no gesture
+ * has happened yet, custodiaPlayNotificationSound() just quietly no-ops.
+ */
+let custodiaAudioCtx = null;
+function custodiaWakeAudioContext() {
+  const Ctor = window.AudioContext || window.webkitAudioContext;
+  if (!Ctor) return;
+  if (!custodiaAudioCtx) {
+    custodiaAudioCtx = new Ctor();
+  } else if (custodiaAudioCtx.state === 'suspended') {
+    custodiaAudioCtx.resume().catch(() => {});
+  }
+}
+document.addEventListener('click', custodiaWakeAudioContext);
+document.addEventListener('keydown', custodiaWakeAudioContext);
+
+function custodiaPlayNotificationSound() {
+  if (custodiaNotificationSoundMuted() || !custodiaAudioCtx || custodiaAudioCtx.state === 'suspended') return;
+  const ctx = custodiaAudioCtx;
+  const now = ctx.currentTime;
+  [[880, 0], [1318.51, 0.11]].forEach(([freq, delay]) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0, now + delay);
+    gain.gain.linearRampToValueAtTime(0.18, now + delay + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 0.28);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now + delay);
+    osc.stop(now + delay + 0.3);
+  });
+}
+
 function custodiaCsrfToken() {
   const meta = document.querySelector('meta[name="csrf-token"]');
   return meta ? meta.getAttribute('content') : '';

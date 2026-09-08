@@ -12,7 +12,26 @@ $user = custodia_require_login();
 $pdo = custodia_db();
 
 $matters = custodia_list_matters_for_user($pdo, $user);
-$matterId = $_GET['matterId'] ?? ($matters[0]['id'] ?? '');
+
+// Default to whichever matter the user most recently viewed (matter.php
+// remembers this in the session on every authorized load) rather than an
+// arbitrary first matter — the normal workflow is "open a matter, then come
+// here to add a document for it," so this default should already be right
+// most of the time. Falls back to the first matter if there's no remembered
+// one, or if it's since gone out of this user's reach (matter access
+// revoked, etc. — custodia_list_matters_for_user() already only returns
+// what they can currently see).
+$matterIds = array_column($matters, 'id');
+$lastViewedMatterId = $_SESSION['custodia_last_matter_id'] ?? null;
+$matterId = $_GET['matterId']
+    ?? (in_array($lastViewedMatterId, $matterIds, true) ? $lastViewedMatterId : null)
+    ?? ($matters[0]['id'] ?? '');
+
+// Keep the remembered matter in sync when the user switches it right here
+// too (via the Matter dropdown below), not just when it comes from matter.php.
+if ($matterId !== '') {
+    $_SESSION['custodia_last_matter_id'] = $matterId;
+}
 
 $allDocs = [];
 $matterPhysicalFiles = [];
@@ -126,7 +145,7 @@ require __DIR__ . '/includes/layout_header.php';
               ?>
               <td><?= custodia_confidentiality_badge($d['confidentiality']) ?><?php if ($d['is_protected']): ?> <?= custodia_protected_badge() ?><?php endif; ?><?php if ($isRestrictedShareRow): ?> <?= custodia_shared_view_only_badge() ?><?php endif; ?></td>
               <td>v<?= (int) $d['current_version_no'] ?></td>
-              <td class="small text-muted"><?= e(custodia_extraction_status_label($d['latest_version']['extraction_status'] ?? 'PENDING')) ?></td>
+              <td class="small"><?= custodia_extraction_status_badge($d['latest_version']['extraction_status'] ?? 'PENDING') ?></td>
               <td class="small text-muted"><?= $d['active_lock'] ? ('🔒 ' . e($d['active_lock']['full_name'])) : '—' ?></td>
               <td class="text-end">
                 <?php

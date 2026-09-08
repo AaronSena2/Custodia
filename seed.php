@@ -14,6 +14,7 @@ require_once __DIR__ . '/includes/audit.php';
 require_once __DIR__ . '/includes/roles.php';
 require_once __DIR__ . '/includes/permissions.php';
 require_once __DIR__ . '/includes/clients.php';
+require_once __DIR__ . '/includes/retention_policies.php';
 
 const DEMO_PASSWORD = 'ChangeMe123!';
 
@@ -244,13 +245,20 @@ if ($northgate && $bellweather) {
     ]);
 }
 
-// A couple of default retention policies, so /admin.php isn't empty on first load.
+// A couple of practice-group-specific retention policies, plus the
+// firm-wide default (security review 2026-09-03, finding 2.1) — so a
+// fresh install demonstrates the exact gap that finding described:
+// Corporate and Litigation get their own rule, while the third seeded
+// practice group, Trusts & Estates, has none and falls back to the
+// default (jobs/overdue_sweep.php).
 $rpStmt = $pdo->query('SELECT COUNT(*) AS n FROM retention_policies')->fetch();
 if ((int) $rpStmt['n'] === 0) {
     $pdo->prepare('INSERT INTO retention_policies (id, practice_area, retention_years, action, trigger_event) VALUES (:id, :pa, :yrs, :action, :trigger)')
         ->execute(['id' => custodia_uuid(), 'pa' => 'Corporate', 'yrs' => 7, 'action' => 'ARCHIVE', 'trigger' => 'MATTER_CLOSE']);
     $pdo->prepare('INSERT INTO retention_policies (id, practice_area, retention_years, action, trigger_event) VALUES (:id, :pa, :yrs, :action, :trigger)')
         ->execute(['id' => custodia_uuid(), 'pa' => 'Litigation', 'yrs' => 10, 'action' => 'REVIEW', 'trigger' => 'MATTER_CLOSE']);
+    $pdo->prepare('INSERT INTO retention_policies (id, practice_area, retention_years, action, trigger_event) VALUES (:id, :pa, :yrs, :action, :trigger)')
+        ->execute(['id' => custodia_uuid(), 'pa' => CUSTODIA_RETENTION_DEFAULT_PRACTICE_AREA, 'yrs' => 7, 'action' => 'REVIEW', 'trigger' => 'MATTER_CLOSE']);
 }
 
 // The practice group catalog (Admin → Practice Groups) — seed_assign_practice_groups()

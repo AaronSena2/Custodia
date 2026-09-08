@@ -3,6 +3,12 @@
 /storage/*
 !/storage/.htaccess
 
+# Real client/matter data used as one-off bulk-import input (see
+# import_clients_matters_v3_additive.php) — same "real client data, not
+# source code" reasoning as storage/* above, it just happens to sit at the
+# repo root instead.
+/*.csv
+
 # Local Claude Code tooling config — machine-specific, not project source.
 /.claude/
 

@@ -64,6 +64,35 @@ function custodia_list_overdue_files(PDO $pdo, array $user): array
     return $stmt->fetchAll();
 }
 
+/**
+ * Files currently checked out to one specific user — powers the Scan
+ * Station's idle-state "Checked Out To You" panel (2026-09-06). Unlike
+ * custodia_list_overdue_files(), this is intentionally NOT scoped to
+ * "matters this user can otherwise see": if it's in your own custody, you
+ * can always see it here regardless of confidentiality tier or ethical
+ * walls — being handed physical custody already implies you were allowed
+ * to check it out in the first place, so there's nothing new being
+ * disclosed by listing it back to you.
+ */
+function custodia_list_files_checked_out_to_user(PDO $pdo, string $userId): array
+{
+    $stmt = $pdo->prepare(
+        "SELECT pf.*, m.matter_number, c.name AS client_name, lcm.due_back_at AS last_movement_due_back_at
+         FROM physical_files pf
+         JOIN matters m ON m.id = pf.matter_id
+         JOIN clients c ON c.id = m.client_id
+         LEFT JOIN custody_movements lcm ON lcm.id = (
+             SELECT id FROM custody_movements
+             WHERE physical_file_id = pf.id AND status = 'COMPLETED'
+             ORDER BY completed_at DESC, requested_at DESC LIMIT 1
+         )
+         WHERE pf.status = 'CHECKED_OUT' AND pf.current_custodian_id = :uid
+         ORDER BY (lcm.due_back_at IS NULL) ASC, lcm.due_back_at ASC"
+    );
+    $stmt->execute(['uid' => $userId]);
+    return $stmt->fetchAll();
+}
+
 /** Powers the Dashboard's "Files Checked Out" stat tile — same RBAC scoping as custodia_list_overdue_files(). */
 function custodia_count_checked_out_files(PDO $pdo, array $user): int
 {
@@ -121,13 +150,27 @@ function custodia_list_files_for_matter(PDO $pdo, array $user, string $matterId)
     return $stmt->fetchAll();
 }
 
+/**
+ * True when $file (as returned by custodia_list_files_for_matter() or
+ * custodia_find_file_by_barcode() — both select last_movement_due_back_at/
+ * due_back_at under this same key) is checked out and past its due-back
+ * date. Factored out of custodia_last_movement_label() below so the Scan
+ * Station can show a plain overdue badge without re-deriving the same date
+ * logic a second time.
+ */
+function custodia_file_is_overdue(array $file): bool
+{
+    $dueBack = $file['last_movement_due_back_at'] ?? null;
+    return $file['status'] === 'CHECKED_OUT' && $dueBack !== null
+        && (new DateTimeImmutable($dueBack)) < new DateTimeImmutable();
+}
+
 /** "Returned — Aug 19" / "Due back Aug 21 — overdue" style text for the Physical Files table's Last Movement column. */
 function custodia_last_movement_label(array $file): string
 {
     $dueBack = $file['last_movement_due_back_at'] ?? null;
     if ($file['status'] === 'CHECKED_OUT' && $dueBack) {
-        $isOverdue = (new DateTimeImmutable($dueBack)) < new DateTimeImmutable();
-        return 'Due back ' . custodia_format_date($dueBack) . ($isOverdue ? ' — overdue' : '');
+        return 'Due back ' . custodia_format_date($dueBack) . (custodia_file_is_overdue($file) ? ' — overdue' : '');
     }
 
     $type = $file['last_movement_type'] ?? null;
@@ -152,12 +195,18 @@ function custodia_find_file_by_barcode(PDO $pdo, array $user, string $barcode, s
     $stmt = $pdo->prepare(
         'SELECT pf.*, m.id AS matter_pk, m.matter_number, c.name AS client_name, m.practice_area,
                 pl.building, pl.room, pl.shelf, pl.bin,
-                cu.id AS custodian_id, cu.full_name AS custodian_name
+                cu.id AS custodian_id, cu.full_name AS custodian_name,
+                lcm.due_back_at AS last_movement_due_back_at
          FROM physical_files pf
          JOIN matters m ON m.id = pf.matter_id
          JOIN clients c ON c.id = m.client_id
          LEFT JOIN physical_locations pl ON pl.id = pf.current_location_id
          LEFT JOIN users cu ON cu.id = pf.current_custodian_id
+         LEFT JOIN custody_movements lcm ON lcm.id = (
+             SELECT id FROM custody_movements
+             WHERE physical_file_id = pf.id AND status = \'COMPLETED\'
+             ORDER BY completed_at DESC, requested_at DESC LIMIT 1
+         )
          WHERE pf.barcode = :barcode'
     );
     $stmt->execute(['barcode' => $barcode]);
@@ -184,6 +233,58 @@ function custodia_find_file_by_barcode(PDO $pdo, array $user, string $barcode, s
     }
 
     return $file;
+}
+
+/**
+ * Fallback lookup for the Scan Station when a barcode label is missing,
+ * damaged, or won't scan — searches by matter number or jacket label
+ * instead (2026-09-06). Scoped to matters the user can already see, same
+ * pattern as custodia_list_overdue_files() — this can never surface a file
+ * whose matter the user isn't otherwise allowed to know about. It's a
+ * convenience for FINDING the right barcode, not a way around RBAC: looking
+ * the matched barcode up afterward still goes through
+ * custodia_find_file_by_barcode()'s own custodia_assert_matter_access() check.
+ */
+function custodia_search_files_fallback(PDO $pdo, array $user, string $query, int $limit = 10): array
+{
+    $query = trim($query);
+    if ($user['role'] === 'GUEST_AUDITOR' || $query === '') {
+        return [];
+    }
+
+    $accessibleMatterIds = null;
+    if (!in_array($user['role'], custodia_firm_wide_roles(), true)) {
+        $matters = custodia_list_matters_for_user($pdo, $user);
+        $accessibleMatterIds = array_column($matters, 'id');
+        if (empty($accessibleMatterIds)) {
+            return [];
+        }
+    }
+
+    $params = ['q1' => '%' . $query . '%', 'q2' => '%' . $query . '%'];
+    $matterFilterSql = '';
+    if ($accessibleMatterIds !== null) {
+        $placeholders = [];
+        foreach ($accessibleMatterIds as $i => $id) {
+            $key = "m{$i}";
+            $placeholders[] = ":{$key}";
+            $params[$key] = $id;
+        }
+        $matterFilterSql = 'AND pf.matter_id IN (' . implode(',', $placeholders) . ')';
+    }
+
+    $limit = max(1, min(50, $limit)); // not user-supplied today, but kept sane if that ever changes
+    $stmt = $pdo->prepare(
+        "SELECT pf.id, pf.barcode, pf.jacket_label, pf.status, m.matter_number, c.name AS client_name
+         FROM physical_files pf
+         JOIN matters m ON m.id = pf.matter_id
+         JOIN clients c ON c.id = m.client_id
+         WHERE (pf.jacket_label LIKE :q1 OR m.matter_number LIKE :q2) {$matterFilterSql}
+         ORDER BY m.matter_number ASC
+         LIMIT {$limit}"
+    );
+    $stmt->execute($params);
+    return $stmt->fetchAll();
 }
 
 /** RBAC matrix: "Register physical file / generate barcode" — Admin and Records Manager only. */

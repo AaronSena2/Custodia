@@ -448,3 +448,49 @@ function custodia_dashboard_analytics(PDO $pdo, array $user): array
         'mattersOpenedSeries' => custodia_analytics_matters_opened_series($pdo, $user),
     ];
 }
+
+/**
+ * Security review 2026-09-03, finding 4.1: the dashboard's 45s live-refresh
+ * timer (dashboard.php) and every fresh page load both call
+ * custodia_dashboard_analytics(), which alone runs 9 queries — with the
+ * page routinely left open across a shift, a review session measured 10+
+ * of those round trips in a single sitting, each one recomputing charts
+ * that hadn't actually changed. This wraps the same function with a short
+ * server-side cache so repeat calls inside one TTL window are free.
+ *
+ * Keyed per user, not globally, because the result set is RBAC-scoped
+ * (custodia_analytics_matter_scope() etc.) — two viewers can legitimately
+ * get different numbers from the same tick. A plain file cache is used
+ * instead of APCu/Redis so this works unmodified on a bare XAMPP install;
+ * it lives under storage/.cache, which .gitignore already excludes the
+ * same way it excludes the rest of storage/.
+ */
+function custodia_dashboard_analytics_cache_path(string $userId): string
+{
+    $dir = rtrim(custodia_config()['cache_path'], '/\\') . '/dashboard_analytics';
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0770, true);
+    }
+    return $dir . '/' . hash('sha256', $userId) . '.json';
+}
+
+function custodia_dashboard_analytics_cached(PDO $pdo, array $user, int $ttlSeconds = 45): array
+{
+    $path = custodia_dashboard_analytics_cache_path($user['id']);
+
+    if (is_file($path) && (time() - (int) @filemtime($path)) < $ttlSeconds) {
+        $cached = json_decode((string) @file_get_contents($path), true);
+        if (is_array($cached)) {
+            return $cached;
+        }
+    }
+
+    $data = custodia_dashboard_analytics($pdo, $user);
+
+    // Best-effort: a read-only storage mount or a filesystem hiccup should
+    // never break the dashboard — it just falls back to computing fresh on
+    // every call, same as before this cache existed.
+    @file_put_contents($path, json_encode($data), LOCK_EX);
+
+    return $data;
+}

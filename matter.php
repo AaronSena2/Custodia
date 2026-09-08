@@ -90,6 +90,15 @@ try {
     exit;
 }
 
+// Remembered so documents.php's own Matter dropdown can default here instead
+// of an arbitrary first matter — the normal workflow is "open a matter, then
+// go add a document for it," and this makes that default land correctly
+// even when the document gets created from the standalone Digital Documents
+// page rather than this page's own Documents tab. Only set on a confirmed,
+// authorized load of this matter (past the try/catch above), never on a
+// denied one.
+$_SESSION['custodia_last_matter_id'] = $matterId;
+
 $tab = $_GET['tab'] ?? 'physical';
 $tabs = ['overview' => 'Overview', 'physical' => 'Physical Files', 'documents' => 'Digital Documents', 'team' => 'Team & Access', 'audit' => 'Audit Trail'];
 if (!isset($tabs[$tab])) {
@@ -110,7 +119,7 @@ $activeNav = 'matters';
 require __DIR__ . '/includes/layout_header.php';
 ?>
 
-<div class="page-breadcrumb"><a href="matters.php">Matters</a> / <?= e($matter['matter_number']) ?></div>
+<div class="page-breadcrumb"><a href="matters.php">Matters</a> / <?= custodia_matter_number_chip($matter['matter_number'], $matter['confidentiality']) ?></div>
 <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
   <div>
     <div class="d-flex align-items-center gap-2">
@@ -161,7 +170,7 @@ require __DIR__ . '/includes/layout_header.php';
         </div>
         <div class="card-body">
           <dl class="row mb-0 small">
-            <dt class="col-5 text-muted">Matter Number</dt><dd class="col-7"><?= e($matter['matter_number']) ?></dd>
+            <dt class="col-5 text-muted">Matter Number</dt><dd class="col-7"><?= custodia_matter_number_chip($matter['matter_number'], $matter['confidentiality']) ?></dd>
             <dt class="col-5 text-muted">Client</dt><dd class="col-7"><a href="client.php?id=<?= e($matter['client_id']) ?>"><?= e($matter['client_name']) ?></a></dd>
             <dt class="col-5 text-muted">Practice Area</dt><dd class="col-7"><?= e($matter['practice_area']) ?></dd>
             <dt class="col-5 text-muted">Status</dt><dd class="col-7"><?= custodia_status_badge($matter['status']) ?></dd>
@@ -558,7 +567,7 @@ require __DIR__ . '/includes/layout_header.php';
               ?>
               <td><?= custodia_confidentiality_badge($d['confidentiality']) ?><?php if ($d['is_protected']): ?> <?= custodia_protected_badge() ?><?php endif; ?><?php if ($isRestrictedShareRow): ?> <?= custodia_shared_view_only_badge() ?><?php endif; ?></td>
               <td>v<?= (int) $d['current_version_no'] ?></td>
-              <td class="small text-muted"><?= e(custodia_extraction_status_label($d['latest_version']['extraction_status'] ?? 'PENDING')) ?></td>
+              <td class="small"><?= custodia_extraction_status_badge($d['latest_version']['extraction_status'] ?? 'PENDING') ?></td>
               <td class="small text-muted"><?= $d['active_lock'] ? ('🔒 ' . e($d['active_lock']['full_name'])) : '—' ?></td>
               <td class="text-end">
                 <?php
