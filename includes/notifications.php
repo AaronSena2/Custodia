@@ -1,16 +1,28 @@
 <?php
 /**
- * Persisted notification inbox — fed by the access-grant flows in
- * includes/access_requests.php and includes/practice_groups.php, each of
- * which calls custodia_notify_user()/custodia_notify_users() right
- * alongside their existing custodia_audit_record() call, in the same
- * transaction. Deliberately separate from audit_log: notifications are a
- * mutable, per-user "have you seen this" inbox (read_at gets updated in
- * place), not part of the hash-chained, append-only security audit trail.
+ * Persisted notification inbox — fed by the custody flows in
+ * includes/custody.php, the access-grant flows in
+ * includes/access_requests.php and includes/practice_groups.php, and the
+ * scheduled jobs, each of which calls custodia_notify_user()/
+ * custodia_notify_users() right alongside their existing
+ * custodia_audit_record() call, in the same transaction. Deliberately
+ * separate from audit_log: notifications are a mutable, per-user "have you
+ * seen this" inbox (read_at gets updated in place), not part of the
+ * hash-chained, append-only security audit trail.
+ *
+ * EMAIL (2026-09-09). custodia_notify_user() is also the single chokepoint
+ * where a notification becomes an outbound email: it queues an email_outbox
+ * row in the caller's own transaction, so "the custody movement happened"
+ * and "the person was queued to be told" commit or roll back together.
+ * Nothing here contacts Microsoft — jobs/send_email_queue.php does that
+ * afterwards, outside any transaction, so a mail outage can never roll back
+ * a custody transfer. Adding a new notification site anywhere in the app
+ * gets email automatically by virtue of going through this function.
  */
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/email_queue.php';
 
 function custodia_notify_user(PDO $pdo, string $userId, string $type, string $title, ?string $body, ?string $entityType = null, ?string $entityId = null): void
 {
@@ -21,6 +33,11 @@ function custodia_notify_user(PDO $pdo, string $userId, string $type, string $ti
         'id' => custodia_uuid(), 'uid' => $userId, 'type' => $type, 'title' => $title,
         'body' => $body, 'etype' => $entityType, 'eid' => $entityId,
     ]);
+
+    // The email chokepoint — see the file docblock. Never throws, never
+    // touches the network; a failure here leaves the notification and its
+    // accompanying state change intact.
+    custodia_email_enqueue_for_notification($pdo, $userId, $type, $title, $body, $entityType, $entityId);
 }
 
 /** @param string[] $userIds */
@@ -78,7 +95,22 @@ function custodia_list_notifications_for_user_paginated(PDO $pdo, string $userId
  */
 function custodia_notification_link(array $notification): string
 {
+    // Anything waiting on the reader's decision belongs in the Approvals
+    // inbox, whatever entity it hangs off — that is the one page where they
+    // can actually act on it.
+    if (in_array($notification['notification_type'] ?? '', ['CHECK_OUT_REQUESTED', 'TRANSFER_REQUESTED', 'ACCESS_REQUESTED'], true)) {
+        return 'approvals.php';
+    }
+
     if (!empty($notification['entity_id'])) {
+        if ($notification['entity_type'] === 'PHYSICAL_FILE') {
+            // The Scan Station, not the dashboard: since the 2026-09-06
+            // overhaul it carries "Checked Out To You" and "Overdue Files"
+            // worklists, so it is where a custody notification actually
+            // leads somewhere useful. Physical files have no detail page of
+            // their own to link to.
+            return 'scan.php';
+        }
         if ($notification['entity_type'] === 'MATTER') {
             return 'matter.php?id=' . urlencode($notification['entity_id']);
         }

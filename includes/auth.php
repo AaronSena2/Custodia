@@ -12,6 +12,8 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/practice_groups.php';
 require_once __DIR__ . '/audit.php';
 require_once __DIR__ . '/security_headers.php';
+require_once __DIR__ . '/notifications.php';
+require_once __DIR__ . '/notification_recipients.php';
 
 function custodia_start_session(): void
 {
@@ -147,6 +149,28 @@ function custodia_register_failed_login(PDO $pdo, array $row): void
             'ipAddress' => custodia_client_ip(),
             'reason' => "Locked after {$security['max_failed_logins']} consecutive failed sign-in attempts.",
         ]);
+
+        // Two audiences, one event. To the account owner this is "you're
+        // locked out, here's why" — and if it wasn't them typing, it is the
+        // only warning they'll get that someone is guessing at their
+        // password. To Admin/Records Manager it's a security signal worth
+        // seeing in aggregate. ACCOUNT_LOCKED is in
+        // CUSTODIA_EMAIL_MANDATORY_TYPES, so it ignores email preferences.
+        $lockMinutes = $security['lockout_minutes'];
+        custodia_notify_user(
+            $pdo, $row['id'], 'ACCOUNT_LOCKED',
+            'Your Custodia account has been locked',
+            "After {$security['max_failed_logins']} failed sign-in attempts, your account is locked for {$lockMinutes} minutes. "
+                . 'If this was not you, contact Records Management — someone may be trying to guess your password.',
+            'USER', $row['id']
+        );
+        custodia_notify_users(
+            $pdo, custodia_security_recipient_ids($pdo), 'ACCOUNT_LOCKED',
+            'Account locked: ' . $row['full_name'],
+            "{$row['full_name']} ({$row['email']}) was locked out after {$security['max_failed_logins']} consecutive failed sign-in attempts.",
+            'USER', $row['id']
+        );
+
         $pdo->commit();
     } catch (Throwable $e) {
         $pdo->rollBack();

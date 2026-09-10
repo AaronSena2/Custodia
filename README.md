@@ -272,6 +272,165 @@ way a real user's browser would: real login sessions, real CSRF tokens,
 real navigation. See `tests/browser/README.md` for coverage and how to
 run it.
 
+## Email notifications (Microsoft Graph)
+
+Notifications have always appeared in the app's own bell inbox. As of
+2026-09-09 they can also be emailed, through the **Microsoft Graph API**
+rather than SMTP — no third-party library, so the app stays dependency-free,
+and it sidesteps Microsoft 365's ongoing retirement of basic SMTP AUTH.
+
+**Everything is configured from Admin → Email Settings** (new
+`manage_email_settings` permission, seeded to System Administrator only), so
+the credentials can be rotated by an administrator without touching code or
+env vars. Email is **off until switched on there**; with it off, notifications
+behave exactly as they always have.
+
+### One-time setup
+
+1. **Run the migration.** `sql/upgrade_022_email_notifications.sql` — creates
+   `app_settings`, `email_outbox`, two per-user preference columns, and the
+   new permission. Safe to re-run.
+
+2. **Set an encryption key.** The Microsoft client secret is encrypted before
+   it is stored, under a key held *outside* the database — so a leaked
+   database, backup or phpMyAdmin session doesn't yield the credential.
+
+   The easiest route is the **Generate a key now** button on Admin → Email
+   Settings: it writes a key to `custodia_secret.key` in the folder *above*
+   the application directory (outside the web root, so it can't be fetched
+   over HTTP) and needs no shell access. It refuses to overwrite an existing
+   key, since that would make everything stored under the old one
+   permanently unreadable.
+
+   Alternatively set the **`CUSTODIA_SECRET_KEY`** environment variable to a
+   32-byte base64 value; it takes precedence over the file. If you go this
+   route, set it as a **SYSTEM** environment variable, not a user one — both
+   the web server *and* the scheduled task that sends the queue have to read
+   it. (A variable that is set but malformed — stray quotes are easy to
+   introduce in the Windows dialog — falls through to the key file rather
+   than disabling email.)
+
+   **Back the key up either way.** If it is lost the stored secret can't be
+   decrypted and has to be re-entered on the settings screen.
+
+   **Cipher.** libsodium is used when the `sodium` extension is enabled, and
+   OpenSSL AES-256-GCM otherwise — both authenticated, so both detect
+   tampering. A stock Windows XAMPP build ships with `extension=sodium`
+   commented out in `php.ini`, which is why the fallback exists; the settings
+   screen reports which one is in use. Stored values carry a prefix naming
+   their cipher, so a machine that later gains or loses the extension can
+   still read what the other wrote.
+
+3. **Register the Azure app** (Entra ID → App registrations):
+   - Add **Mail.Send** as an **Application** permission (not delegated), then
+     **Grant admin consent**.
+   - Create a client secret and copy its **Value** (Azure shows it once).
+   - Note the Directory (tenant) ID and Application (client) ID.
+
+4. **Lock the app to one mailbox.** ⚠ `Mail.Send` as an application permission
+   is **tenant-wide by default** — as granted, the app can send as *any*
+   mailbox in the firm, including a partner's. Restrict it in Exchange Online
+   PowerShell:
+
+   ```powershell
+   New-ApplicationAccessPolicy -AppId <application-client-id> `
+     -PolicyScopeGroupId registry-noreply@yourfirm.com `
+     -AccessRight RestrictAccess `
+     -Description "Custodia registry notifications only"
+   ```
+
+   For a legal registry this is not optional hardening.
+
+5. **Fill in Admin → Email Settings**: tenant ID, client ID, secret, the
+   sending mailbox (a dedicated shared mailbox is ideal — no licence needed),
+   the secret's expiry date, and the **Application URL** that email links
+   point at. That URL must be reachable from the recipient's own machine — the
+   `php -S localhost:8080` quick-start binds loopback only, so links would
+   work on the server and nowhere else. Use **Send a test** to confirm the
+   credentials before switching anything on.
+
+6. **Register the queue job** with Task Scheduler, every 5 minutes (exact
+   command in `jobs/send_email_queue.php`'s header). Until it is registered,
+   mail queues in `email_outbox` and never leaves.
+
+**Roll it out with the redirect on.** Setting "Redirect all mail to" sends
+every notification to one address instead of to real recipients — worth using
+for the first run against the live database.
+
+### How it works
+
+Sending is **store-and-forward**, never inline. `custodia_notify_user()` — the
+one function every notification in the app goes through — queues an
+`email_outbox` row *inside the caller's existing transaction*, so "the custody
+movement happened" and "the person was queued to be told" commit or roll back
+together. `jobs/send_email_queue.php` talks to Microsoft afterwards, outside
+any transaction. A mail outage can therefore never roll back a custody
+transfer, and the enqueue path is written so that even a missing table (the
+migration not yet run) degrades to "no email" rather than failing the movement.
+
+The queue job re-checks at send time what may have changed in the intervening
+minutes: the matter's confidentiality tier, ethical walls and access grants
+(via the app's own `custodia_assert_matter_access()`), the recipient's
+preferences, the hourly cap, and address deliverability. A row that no longer
+passes is marked `SKIPPED` with a reason rather than sent.
+
+### What email says about a confidential matter
+
+An in-app notification lives inside the audit perimeter; an email does not.
+So the body is rendered against the matter's tier:
+
+| Tier | Email contains |
+|---|---|
+| `STANDARD` | Matter number, client, the notification's own title and body |
+| `RESTRICTED` / `PRIVILEGED` | Matter number and a sign-in link only — no client name, no case title, and no free-text reason (reasons routinely quote case detail) |
+
+Links always point at a page requiring sign-in. There is deliberately **no
+tokenised one-click approve/reject** — that would be a second, weaker
+authentication path into exactly the decisions the audit trail exists to
+defend.
+
+### Which events send email
+
+Every notification in the app now also emails, and the custody and access
+flows gained the notifications they were missing (see below). Security alerts
+— `AUDIT_CHAIN_BROKEN`, `THREAT_ALERT`, `ACCOUNT_LOCKED` — **ignore
+per-user preferences and the hourly cap**: an alarm someone can switch off is
+not an alarm.
+
+Two guards worth knowing about:
+
+- **Undeliverable addresses are skipped.** The 2026-09-05 imports assigned
+  effectively every matter to a placeholder incharge at
+  `unassigned-partner-v2@placeholder.local`. Without this, any "notify the
+  matter's incharge" rule would hard-bounce on nearly every matter in the
+  system. Recipient resolution falls through to Records Managers instead. This
+  is a guard, not a fix — the placeholders still want cleaning up.
+- **Approval notifications go to the matter's incharge, not to every
+  firm-wide approver.** `approve_custody_movements` and
+  `decide_access_requests` are firm-wide permissions; pinging every holder
+  about every one of ~4,273 matters would be unusable. Nobody loses authority
+  — the Approvals inbox still shows everyone the full queue.
+
+### Custody and access notifications added at the same time
+
+Before this, `includes/custody.php` contained **no notifications at all**:
+five blocking handoffs, and the person who had to act was never told. A
+transfer request in particular can only be approved by the file's *current
+custodian*, and they found out by happening to open the Approvals page.
+Added, each inside the same transaction as its existing audit entry:
+
+- check-out requested → the matter's incharge (or Records Managers)
+- check-out approved / rejected → the requester, with the reason on a rejection
+- transfer requested → **the current custodian**
+- transfer approved / rejected → the requester
+- override check-in → the custodian whose file was returned on their behalf
+- access request submitted → the matter's incharge (the decision was already
+  notified back to the requester; the request itself was not)
+- account locked → the account owner *and* Admin/Records Manager
+
+These are improvements to the in-app inbox in their own right; email is what
+they additionally become.
+
 ## Known gaps for a production deployment
 
 - **Deployment topology, backups, log rotation, and process supervision**

@@ -10,6 +10,7 @@ require_once __DIR__ . '/includes/practice_groups.php';
 require_once __DIR__ . '/includes/physical_files.php';
 require_once __DIR__ . '/includes/audit_query.php';
 require_once __DIR__ . '/includes/listing.php';
+require_once __DIR__ . '/includes/email_settings_admin.php';
 
 $user = custodia_require_login();
 $pdo = custodia_db();
@@ -21,6 +22,7 @@ $canManagePracticeGroups = custodia_user_has_permission($pdo, $user, 'manage_pra
 $canManageLocations = custodia_user_has_permission($pdo, $user, 'manage_physical_locations');
 $canViewAudit = custodia_user_has_permission($pdo, $user, 'view_audit_log');
 $canManageRetention = custodia_user_has_permission($pdo, $user, 'manage_retention_policies');
+$canManageEmail = custodia_user_has_permission($pdo, $user, 'manage_email_settings');
 
 // Security review 2026-09-03, finding 2.2: this used to be a hardcoded
 // custodia_require_role($user, ['SYSTEM_ADMIN', 'RECORDS_MANAGER']) gate on
@@ -39,7 +41,7 @@ $canManageRetention = custodia_user_has_permission($pdo, $user, 'manage_retentio
 // behavior for SYSTEM_ADMIN/RECORDS_MANAGER, whose defaults already grant
 // several of these).
 $hasAnyAdminAreaPermission = $canManageUsers || $canManagePracticeGroups
-    || $canManageLocations || $canViewAudit || $canManageRetention
+    || $canManageLocations || $canViewAudit || $canManageRetention || $canManageEmail
     || custodia_user_has_permission($pdo, $user, 'export_audit_log')
     || custodia_user_has_permission($pdo, $user, 'verify_audit_chain');
 if (!$hasAnyAdminAreaPermission) {
@@ -74,6 +76,11 @@ if ($tab === 'locations' && !$canManageLocations) {
     require __DIR__ . '/403.php';
     exit;
 }
+if ($tab === 'email' && !$canManageEmail) {
+    http_response_code(403);
+    require __DIR__ . '/403.php';
+    exit;
+}
 if ($tab === 'audit' && !$canViewAudit) {
     http_response_code(403);
     require __DIR__ . '/403.php';
@@ -85,7 +92,7 @@ if ($tab === 'audit' && !$canViewAudit) {
 // explicit permission check of its own; it was implicitly gated only by
 // the page-level role check just removed above. Give it the same
 // explicit, testable 403 the other four tabs already have.
-if (!in_array($tab, ['users', 'permissions', 'practicegroups', 'locations', 'audit'], true) && !$canManageRetention) {
+if (!in_array($tab, ['users', 'permissions', 'practicegroups', 'locations', 'audit', 'email'], true) && !$canManageRetention) {
     http_response_code(403);
     require __DIR__ . '/403.php';
     exit;
@@ -164,6 +171,11 @@ if ($tab === 'users') {
     $userResult = custodia_apply_listing($allUsersList, $userListParams, $userFilters, $userSearch, ['full_name', 'email', 'employee_id']);
 }
 
+$emailSettings = $tab === 'email' ? custodia_mail_settings($pdo) : [];
+$emailOutbox = $tab === 'email' ? custodia_list_recent_outbox($pdo) : [];
+$emailCounts = $tab === 'email' ? custodia_email_outbox_counts($pdo) : [];
+$emailSecretDays = $tab === 'email' ? custodia_mail_secret_days_remaining($emailSettings) : null;
+
 $pageTitle = 'Admin';
 $activeNav = 'admin';
 require __DIR__ . '/includes/layout_header.php';
@@ -180,6 +192,9 @@ require __DIR__ . '/includes/layout_header.php';
   <?php endif; ?>
   <?php if ($canManageLocations): ?>
     <li class="nav-item"><a class="nav-link <?= $tab === 'locations' ? 'active' : '' ?>" href="admin.php?tab=locations">Locations</a></li>
+  <?php endif; ?>
+  <?php if ($canManageEmail): ?>
+    <li class="nav-item"><a class="nav-link <?= $tab === 'email' ? 'active' : '' ?>" href="admin.php?tab=email">Email Settings</a></li>
   <?php endif; ?>
   <?php if ($canViewAudit): ?>
     <li class="nav-item"><a class="nav-link <?= $tab === 'audit' ? 'active' : '' ?>" href="admin.php?tab=audit">Audit Log</a></li>
@@ -742,6 +757,272 @@ require __DIR__ . '/includes/layout_header.php';
     document.getElementById('editLocationType').value = loc.locationType;
     bootstrap.Modal.getOrCreateInstance(document.getElementById('editLocationModal')).show();
   }
+  </script>
+
+<?php elseif ($tab === 'email'): ?>
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="page-title" style="font-size: 1.4rem; margin-bottom: 0;">Email Settings</h1>
+    <span class="badge <?= $emailSettings['enabled'] ? 'bg-success' : 'bg-secondary' ?>">
+      <?= $emailSettings['enabled'] ? 'Email notifications ON' : 'Email notifications OFF' ?>
+    </span>
+  </div>
+
+  <?php if (custodia_crypto_backend() === null): ?>
+    <div class="alert alert-danger">
+      <strong>No encryption extension is available.</strong>
+      The Microsoft client secret is encrypted before it is stored, and this PHP install has neither
+      <code>sodium</code> nor <code>openssl</code> enabled. Open <code>php.ini</code>, uncomment
+      <code>extension=sodium</code> (or <code>extension=openssl</code>), and restart PHP.
+    </div>
+  <?php elseif (custodia_secret_key() === null): ?>
+    <div class="alert alert-warning">
+      <strong>No encryption key is configured yet.</strong>
+      The client secret is encrypted before it is stored, and the key for that is kept outside the
+      database so a stolen backup or database dump doesn't hand over the credential.
+      <div class="mt-3 d-flex gap-2 align-items-center flex-wrap">
+        <button class="btn btn-sm btn-primary" id="generateKeyBtn" type="button">Generate a key now</button>
+        <span class="small text-muted">
+          Writes it to <code><?= e(custodia_secret_key_file()) ?></code> &mdash; outside the web folder, so it can't be fetched over HTTP.
+        </span>
+      </div>
+      <div class="alert alert-danger d-none mt-3 mb-0" id="generateKeyError"></div>
+      <div class="mt-3" id="generateKeyPathRow" style="display:none">
+        <label class="form-label small mb-1">Write the key to this folder instead</label>
+        <input class="form-control form-control-sm" id="generateKeyPath"
+               placeholder="e.g. C:\ProgramData\Custodia">
+        <div class="form-text">
+          Any folder PHP can write to that is <strong>not</strong> inside the application folder.
+          The file will be named <code>custodia_secret.key</code>.
+        </div>
+      </div>
+      <div class="mt-3 small text-muted">
+        Prefer a system environment variable? Set <code>CUSTODIA_SECRET_KEY</code> to a 32-byte base64 value and
+        restart PHP &mdash; it takes precedence over the file. Either way, <strong>back the key up</strong>: if it is
+        lost the stored secret can't be decrypted and has to be entered again.
+        <?php if (custodia_crypto_backend() === 'openssl'): ?>
+          <br>This server doesn't have <code>sodium</code> enabled, so OpenSSL AES-256-GCM will be used instead.
+          That's fine &mdash; both detect tampering &mdash; but enabling <code>extension=sodium</code> in
+          <code>php.ini</code> is the stronger default if you'd rather.
+        <?php endif; ?>
+      </div>
+    </div>
+    <script>
+      document.getElementById('generateKeyBtn').addEventListener('click', async (evt) => {
+        const btn = evt.currentTarget;
+        const errBox = document.getElementById('generateKeyError');
+        btn.disabled = true; btn.textContent = 'Working…';
+        errBox.classList.add('d-none');
+        try {
+          const keyPath = document.getElementById('generateKeyPath').value.trim();
+          const result = await custodiaPost('actions/generate_secret_key.php', keyPath ? { keyPath } : {});
+          custodiaFlash('Encryption key created at ' + result.path + '. Back this file up.');
+          setTimeout(() => window.location.reload(), 900);
+        } catch (err) {
+          errBox.textContent = err.message;
+          errBox.classList.remove('d-none');
+          // Only surface the manual path field once the automatic locations
+          // have actually failed — it is an escape hatch, not a step.
+          document.getElementById('generateKeyPathRow').style.display = '';
+          btn.disabled = false; btn.textContent = 'Generate a key now';
+        }
+      });
+    </script>
+  <?php else: ?>
+    <div class="alert alert-success py-2">
+      <span class="small">
+        Encryption key loaded from <?= custodia_secret_key_source() === 'environment' ? 'the <code>CUSTODIA_SECRET_KEY</code> environment variable' : '<code>' . e(custodia_secret_key_file()) . '</code>' ?>,
+        using <?= custodia_crypto_backend() === 'sodium' ? 'libsodium' : 'OpenSSL AES-256-GCM' ?>.
+        <?php if (custodia_secret_key_source() === 'file'): ?>
+          Make sure that file is backed up &mdash; without it the stored client secret can't be decrypted.
+        <?php endif; ?>
+      </span>
+    </div>
+  <?php endif; ?>
+
+  <?php if ($emailSecretDays !== null && $emailSecretDays < 0): ?>
+    <div class="alert alert-danger">
+      <strong>The client secret expired <?= e((string) abs($emailSecretDays)) ?> day(s) ago.</strong>
+      Microsoft will be rejecting every send. Create a new secret in the Azure app registration and paste it below.
+    </div>
+  <?php elseif ($emailSecretDays !== null && $emailSecretDays <= CUSTODIA_MAIL_SECRET_WARN_DAYS): ?>
+    <div class="alert alert-warning">
+      <strong>The client secret expires in <?= e((string) $emailSecretDays) ?> day(s).</strong>
+      Rotate it in Azure and paste the new value below before it lapses &mdash; email stops silently when it does.
+    </div>
+  <?php endif; ?>
+
+  <?php if (!empty($emailSettings['redirectTo'])): ?>
+    <div class="alert alert-info">
+      <strong>Test mode is on.</strong> Every notification is being redirected to
+      <code><?= e($emailSettings['redirectTo']) ?></code> instead of its real recipient.
+      Clear the redirect field below once you are happy with what is going out.
+    </div>
+  <?php endif; ?>
+
+  <div class="row g-3">
+    <div class="col-lg-7">
+      <div class="card p-3">
+        <h2 class="h6 mb-3">Microsoft Graph connection</h2>
+        <form id="emailSettingsForm" data-action-url="actions/save_email_settings.php">
+          <?= custodia_csrf_field() ?>
+          <div class="alert alert-danger d-none form-error"></div>
+
+          <div class="mb-3">
+            <label class="form-label">Directory (tenant) ID</label>
+            <input class="form-control" name="tenantId" required value="<?= e((string) ($emailSettings['tenantId'] ?? '')) ?>">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Application (client) ID</label>
+            <input class="form-control" name="clientId" required value="<?= e((string) ($emailSettings['clientId'] ?? '')) ?>">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Client secret</label>
+            <input class="form-control" name="clientSecret" type="password" autocomplete="new-password"
+                   placeholder="<?= $emailSettings['secretIsSet'] ? 'Stored — leave blank to keep it' : 'Paste the secret VALUE from Azure' ?>">
+            <div class="form-text">
+              <?php if ($emailSettings['secretIsSet']): ?>
+                Configured <?= e(custodia_format_datetime($emailSettings['secretMeta']['updatedAt'] ?? null)) ?>.
+                It is encrypted and never shown again &mdash; leave this blank to keep it, or paste a new one to rotate.
+              <?php else: ?>
+                Azure shows the secret <em>Value</em> only once, at creation. Copy the Value, not the Secret ID.
+              <?php endif; ?>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Secret expires on</label>
+            <input class="form-control" name="secretExpiresOn" type="date" value="<?= e((string) ($emailSettings['secretExpiresOn'] ?? '')) ?>">
+            <div class="form-text">From the Azure app registration. Used only to warn you here before it lapses.</div>
+          </div>
+
+          <hr>
+
+          <div class="mb-3">
+            <label class="form-label">Sending mailbox</label>
+            <input class="form-control" name="senderAddress" type="email" required
+                   placeholder="registry-noreply@yourfirm.com" value="<?= e((string) ($emailSettings['senderAddress'] ?? '')) ?>">
+            <div class="form-text">
+              The shared mailbox the app sends as. It must be the mailbox named in the Exchange application
+              access policy for this app registration.
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Sender display name</label>
+            <input class="form-control" name="senderName" value="<?= e((string) ($emailSettings['senderName'] ?? 'Custodia Registry')) ?>">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Application URL</label>
+            <input class="form-control" name="baseUrl" placeholder="https://registry.yourfirm.local"
+                   value="<?= e((string) ($emailSettings['baseUrl'] ?? '')) ?>">
+            <div class="form-text">
+              Where the &ldquo;Open in Custodia&rdquo; links in emails point. It has to be an address the
+              recipient's own machine can actually reach &mdash; <code>localhost</code> works only on this server.
+            </div>
+          </div>
+
+          <hr>
+
+          <div class="mb-3">
+            <label class="form-label">Redirect all mail to (test mode)</label>
+            <input class="form-control" name="redirectTo" type="email" placeholder="you@yourfirm.com &mdash; blank for normal delivery"
+                   value="<?= e((string) ($emailSettings['redirectTo'] ?? '')) ?>">
+            <div class="form-text">
+              While this is set, nothing reaches real recipients. Use it for the first run against live data.
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Maximum emails per person per hour</label>
+            <input class="form-control" name="maxPerHour" type="number" min="1" max="500"
+                   value="<?= e((string) ($emailSettings['maxPerHour'] ?? CUSTODIA_MAIL_DEFAULT_MAX_PER_HOUR)) ?>">
+            <div class="form-text">Anything past the cap is held back. Security alerts ignore this.</div>
+          </div>
+
+          <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" role="switch" id="emailEnabled" name="enabled" value="1"
+                   <?= $emailSettings['enabled'] ? 'checked' : '' ?>>
+            <label class="form-check-label" for="emailEnabled">Send email notifications</label>
+            <div class="form-text">
+              With this off, notifications still appear in the app; nothing is queued or sent.
+            </div>
+          </div>
+
+          <button class="btn btn-primary" type="submit">Save settings</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="col-lg-5">
+      <div class="card p-3 mb-3">
+        <h2 class="h6 mb-2">Send a test</h2>
+        <p class="text-muted small mb-3">
+          Sends one message straight through Graph, bypassing the queue, so you can confirm the credentials
+          work without waiting for a real notification.
+        </p>
+        <form id="testEmailForm" data-action-url="actions/send_test_email.php">
+          <?= custodia_csrf_field() ?>
+          <div class="alert alert-danger d-none form-error"></div>
+          <div class="input-group">
+            <input class="form-control" name="toEmail" type="email" required
+                   placeholder="you@yourfirm.com" value="<?= e($user['email']) ?>">
+            <button class="btn btn-outline-primary" type="submit">Send test</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card p-3 mb-3">
+        <h2 class="h6 mb-2">Queue</h2>
+        <div class="d-flex gap-3 flex-wrap">
+          <div><span class="badge bg-secondary"><?= e((string) ($emailCounts['pending'] ?? 0)) ?></span> pending</div>
+          <div><span class="badge bg-success"><?= e((string) ($emailCounts['sent'] ?? 0)) ?></span> sent</div>
+          <div><span class="badge bg-warning text-dark"><?= e((string) ($emailCounts['skipped'] ?? 0)) ?></span> skipped</div>
+          <div><span class="badge bg-danger"><?= e((string) ($emailCounts['failed'] ?? 0)) ?></span> failed</div>
+        </div>
+        <p class="text-muted small mb-0 mt-3">
+          Queued mail is delivered by <code>jobs/send_email_queue.php</code>, which needs a Task Scheduler entry
+          running every 5 minutes. Until that is registered, messages queue here and never leave.
+        </p>
+      </div>
+
+      <div class="card p-3">
+        <h2 class="h6 mb-2">Recent activity</h2>
+        <?php if (empty($emailOutbox)): ?>
+          <div class="text-muted small">Nothing queued yet.</div>
+        <?php else: ?>
+          <div class="table-responsive">
+            <table class="table table-sm mb-0 align-middle">
+              <thead class="table-light"><tr><th>When</th><th>To</th><th>Type</th><th>Status</th></tr></thead>
+              <tbody>
+                <?php foreach ($emailOutbox as $row): ?>
+                  <tr>
+                    <td class="mono small text-muted"><?= e(custodia_format_datetime($row['created_at'])) ?></td>
+                    <td class="small"><?= e($row['recipient_name'] ?? $row['to_email']) ?></td>
+                    <td class="small"><?= e($row['notification_type']) ?></td>
+                    <td>
+                      <span class="badge <?= $row['status'] === 'SENT' ? 'bg-success' : ($row['status'] === 'FAILED' ? 'bg-danger' : ($row['status'] === 'SKIPPED' ? 'bg-warning text-dark' : 'bg-secondary')) ?>">
+                        <?= e($row['status']) ?>
+                      </span>
+                      <?php if (!empty($row['skip_reason']) || !empty($row['last_error'])): ?>
+                        <div class="small text-muted"><?= e(custodia_mail_truncate((string) ($row['skip_reason'] ?: $row['last_error']), 90)) ?></div>
+                      <?php endif; ?>
+                    </td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+        <?php endif; ?>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    custodiaWireActionForm(document.getElementById('emailSettingsForm'), () => {
+      custodiaFlash('Email settings saved.');
+      setTimeout(() => window.location.reload(), 700);
+    });
+    custodiaWireActionForm(document.getElementById('testEmailForm'), (result) => {
+      custodiaFlash('Test message sent to ' + result.to + '.');
+    });
   </script>
 
 <?php elseif ($tab === 'audit'): ?>

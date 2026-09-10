@@ -6,6 +6,15 @@
  * here writes its audit entry inside the SAME PDO transaction as the
  * physical_files/custody_movements update — a movement is never "completed"
  * without its audit row existing.
+ *
+ * NOTIFICATIONS (2026-09-09). Until this date none of these transitions told
+ * anybody: a paralegal's check-out request, and more importantly a transfer
+ * request — which only the file's CURRENT CUSTODIAN can approve — sat in the
+ * Approvals queue until that person happened to look. Every blocking handoff
+ * below now writes a notification inside the same transaction as its audit
+ * entry, which also makes it an email (see custodia_notify_user()).
+ * Recipient selection for the approval-side notifications is deliberately
+ * narrower than the firm-wide permission — see includes/notification_recipients.php.
  */
 
 require_once __DIR__ . '/db.php';
@@ -13,6 +22,8 @@ require_once __DIR__ . '/errors.php';
 require_once __DIR__ . '/audit.php';
 require_once __DIR__ . '/matter_access.php';
 require_once __DIR__ . '/permissions.php';
+require_once __DIR__ . '/notifications.php';
+require_once __DIR__ . '/notification_recipients.php';
 
 function custodia_load_file_or_throw(PDO $pdo, string $fileId): array
 {
@@ -75,6 +86,21 @@ function custodia_checkout(PDO $pdo, array $user, string $fileId, string $reason
             'ipAddress' => $ipAddress,
             'metadata' => ['movementId' => $movementId],
         ]);
+
+        if (!$autoApproved) {
+            // The request blocks until somebody approves it, so somebody has
+            // to be told it exists.
+            $label = custodia_physical_file_label($pdo, $file['id']);
+            custodia_notify_users(
+                $pdo,
+                custodia_matter_approver_ids($pdo, $file['matter_id'], $user['id']),
+                'CHECK_OUT_REQUESTED',
+                "{$user['full_name']} has requested a file: {$label}",
+                $reason,
+                'PHYSICAL_FILE',
+                $file['id']
+            );
+        }
 
         $pdo->commit();
         return ['id' => $movementId, 'status' => $status];
@@ -171,6 +197,23 @@ function custodia_approve_movement(PDO $pdo, array $user, string $movementId, st
             'metadata' => ['movementId' => $movement['id']],
         ]);
 
+        $label = custodia_physical_file_label($pdo, $movement['physical_file_id']);
+        if ($isTransfer) {
+            custodia_notify_user(
+                $pdo, $movement['to_user_id'], 'TRANSFER_APPROVED',
+                "Transfer approved — you now hold {$label}",
+                "{$user['full_name']} approved the transfer. The file is now recorded in your custody.",
+                'PHYSICAL_FILE', $movement['physical_file_id']
+            );
+        } else {
+            custodia_notify_user(
+                $pdo, $movement['to_user_id'], 'CHECK_OUT_APPROVED',
+                "Request approved — {$label}",
+                "{$user['full_name']} approved your request. The file is now recorded in your custody.",
+                'PHYSICAL_FILE', $movement['physical_file_id']
+            );
+        }
+
         $pdo->commit();
         return ['id' => $movement['id']];
     } catch (Throwable $e) {
@@ -217,6 +260,19 @@ function custodia_reject_movement(PDO $pdo, array $user, string $movementId, str
             'ipAddress' => $ipAddress,
             'metadata' => ['movementId' => $movement['id']],
         ]);
+
+        // The reason matters more here than on an approval — a declined
+        // request with no explanation just gets asked again.
+        if (!empty($movement['requested_by_id'])) {
+            $label = custodia_physical_file_label($pdo, $movement['physical_file_id']);
+            custodia_notify_user(
+                $pdo, $movement['requested_by_id'],
+                $movement['movement_type'] === 'TRANSFER' ? 'TRANSFER_REJECTED' : 'CHECK_OUT_REJECTED',
+                "Request declined — {$label}",
+                "{$user['full_name']} declined the request. Reason: {$reason}",
+                'PHYSICAL_FILE', $movement['physical_file_id']
+            );
+        }
 
         $pdo->commit();
         return ['id' => $movement['id']];
@@ -292,6 +348,19 @@ function custodia_complete_checkin(PDO $pdo, array $user, array $file, string $l
             'metadata' => ['movementId' => $movementId, 'previousCustodianId' => $file['current_custodian_id']],
         ]);
 
+        // An override takes a file out of someone's custody without their
+        // involvement. That is a chain-of-custody exception, and the person
+        // it happened to should not have to discover it from the audit log.
+        if ($isOverride && !empty($file['current_custodian_id']) && $file['current_custodian_id'] !== $user['id']) {
+            $label = custodia_physical_file_label($pdo, $file['id']);
+            custodia_notify_user(
+                $pdo, $file['current_custodian_id'], 'OVERRIDE_CHECK_IN',
+                "Returned on your behalf — {$label}",
+                "{$user['full_name']} returned this file to the registry on your behalf. Reason: {$reason}",
+                'PHYSICAL_FILE', $file['id']
+            );
+        }
+
         $pdo->commit();
         return ['id' => $movementId];
     } catch (Throwable $e) {
@@ -357,6 +426,21 @@ function custodia_request_transfer(PDO $pdo, array $user, string $fileId, string
             'ipAddress' => $ipAddress,
             'metadata' => ['movementId' => $movementId, 'currentCustodianId' => $file['current_custodian_id']],
         ]);
+
+        // The current custodian is the ONLY person who can approve this
+        // (see custodia_approve_movement()'s TRANSFER branch), so they are
+        // the only person it makes sense to notify. Before this existed, a
+        // transfer request was invisible to them until they happened to open
+        // the Approvals page.
+        if (!empty($file['current_custodian_id'])) {
+            $label = custodia_physical_file_label($pdo, $file['id']);
+            custodia_notify_user(
+                $pdo, $file['current_custodian_id'], 'TRANSFER_REQUESTED',
+                "{$user['full_name']} has requested a file you hold: {$label}",
+                $reason,
+                'PHYSICAL_FILE', $file['id']
+            );
+        }
 
         $pdo->commit();
         return ['id' => $movementId, 'status' => 'PENDING_APPROVAL'];

@@ -6,6 +6,7 @@ require_once __DIR__ . '/errors.php';
 require_once __DIR__ . '/audit.php';
 require_once __DIR__ . '/permissions.php';
 require_once __DIR__ . '/notifications.php';
+require_once __DIR__ . '/notification_recipients.php';
 require_once __DIR__ . '/digital_documents.php';
 
 function custodia_resolve_matter_id(PDO $pdo, string $entityType, string $entityId): string
@@ -63,6 +64,39 @@ function custodia_create_access_request(PDO $pdo, array $user, string $entityTyp
             'actorId' => $user['id'], 'actionType' => 'ACCESS_REQUESTED', 'entityType' => $entityType, 'entityId' => $entityId,
             'reason' => $reason, 'ipAddress' => $ipAddress, 'metadata' => ['accessRequestId' => $id, 'requestType' => $requestType],
         ]);
+
+        // Until 2026-09-09 this told nobody. The requester was notified of
+        // the DECISION (see custodia_decide_access_request() below), but the
+        // person who has to make that decision was never told the request
+        // existed — they had to spot it in the Approvals queue. A request
+        // for access to a confidential matter is a blocking ask; it needs to
+        // reach someone who can answer it.
+        //
+        // DESTRUCTION_REVIEW requests come from the automated retention
+        // sweep rather than a person, and that job already notifies
+        // Admin/Records Manager itself with a single summary rather than one
+        // notification per flagged matter — so they're excluded here to
+        // avoid duplicating that into a per-matter flood.
+        if ($requestType !== 'DESTRUCTION_REVIEW') {
+            try {
+                $matterId = custodia_resolve_matter_id($pdo, $entityType, $entityId);
+                $entityLabel = custodia_describe_access_entity($pdo, $entityType, $entityId);
+                custodia_notify_users(
+                    $pdo,
+                    custodia_matter_approver_ids($pdo, $matterId, $user['id']),
+                    'ACCESS_REQUESTED',
+                    "{$user['full_name']} has requested access: {$entityLabel}",
+                    $reason,
+                    $entityType,
+                    $entityId
+                );
+            } catch (Throwable $e) {
+                // Notifying must never be what stops an access request from
+                // being recorded — the request is the thing that matters.
+                error_log('[custodia] access-request notification skipped: ' . $e->getMessage());
+            }
+        }
+
         $pdo->commit();
         return ['id' => $id];
     } catch (Throwable $e) {

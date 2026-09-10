@@ -22,6 +22,13 @@
 !/sql/*.sql
 *.tar.gz
 
+# Email encryption key. It normally lives OUTSIDE this folder (see
+# custodia_secret_key_file() in includes/app_settings.php), but the Email
+# Settings screen lets an admin choose a path, so this is a safety net:
+# committing the key would put the Microsoft client secret's protection in
+# the repo alongside the ciphertext it protects.
+custodia_secret.key
+
 # OS/editor noise.
 Thumbs.db
 desktop.ini
